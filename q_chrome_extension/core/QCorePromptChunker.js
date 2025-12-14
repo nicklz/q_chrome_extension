@@ -183,28 +183,58 @@
 
   function promptOvermax() {
     setInterval(() => {
-      const s = window?.QCoreContent?.getState();
+      const s = window?.QCoreContent?.getState?.() || {};
       const ta = document.querySelector('#prompt-textarea');
-      if (!ta) return;
+      if (!ta || s.locked === true) return;
+  
       const text = ta.textContent || '';
-      if (text.length > TOKEN_OVERMAX && s.locked !== true) {
-        s.locked = true; setState(s);
-        const half = Math.floor(TOKEN_OVERMAX / 2);
-        const chunks = [];
-        for (let i = 0; i < text.length; i += half) chunks.push(text.slice(i, i + half));
-        (async () => {
-          for (let i = 0; i < chunks.length; i++) {
-            const tune = (i < chunks.length - 1) ? ' CHUNKED — reply OK' : ' FINAL — execute full prompt';
-            sendPrompt(chunks[i] + tune);
-            await new Promise(r => setTimeout(r, 1200));
-          }
-          const ns = window?.QCoreContent?.getState(); ns.locked = false; setState(ns);
-        })();
+      if (text.length <= TOKEN_OVERMAX) return;
+  
+      s.locked = true;
+      setState(s);
+  
+      // ── core logic ─────────────────────────────────────────────
+      // total length = L
+      // remove first (OVERMAX / 4) and last (OVERMAX / 4)
+      // resulting kept chunk = OVERMAX / 2
+      const quarter = Math.floor(TOKEN_OVERMAX / 4);
+      const half = Math.floor(TOKEN_OVERMAX / 2);
+  
+      const start = quarter;
+      const end = start + half;
+  
+      const sliced = text.slice(start, end);
+      // ──────────────────────────────────────────────────────────
+  
+      (async () => {
+        sessionStorage.setItem('q_after_reload_countdown', '1');
+        sendPrompt(sliced);
+        await new Promise(r => setTimeout(r, 400));
+        window.location.reload();
+      })();
+    }, 100000);
+  }
+  
+  function postReloadCountdown() {
+    if (!sessionStorage.getItem('q_after_reload_countdown')) return;
+    sessionStorage.removeItem('q_after_reload_countdown');
+  
+    let n = 10;
+    const id = setInterval(() => {
+      if (n > 0) {
+        console.log(n);
+        n--;
+      } else {
+        console.log('complete');
+        clearInterval(id);
       }
     }, 1000);
   }
-
+  
   promptOvermax();
+  postReloadCountdown();
+  
+  
 
   window.QCorePromptChunker = { sendPrompt, getResponse, promptOvermax };
 })();
