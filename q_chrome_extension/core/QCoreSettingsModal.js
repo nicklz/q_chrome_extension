@@ -1,4 +1,4 @@
-// plugins/QCoreSettings.js
+// core/QCoreSettings.js
 (function () {
     // QCoreSettings — settings modal (debug toggle, credentials, flags manager)
     if (window.showSettingsModal) return;

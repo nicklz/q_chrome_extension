@@ -1,4 +1,4 @@
-// plugins/QCoreFilesModal.js
+// core/QCoreFilesModal.js
 // [Q] QCoreFilesModal — Files popup (tickets index + quick open/delete/create)
 // no critical data is lost
 //

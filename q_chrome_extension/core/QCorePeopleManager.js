@@ -1,4 +1,4 @@
-// plugins/QCorePeopleManager.js
+// core/QCorePeopleManager.js
 (function () {
   // Prevent duplicate load
   if (window.QCorePeopleManager) return;

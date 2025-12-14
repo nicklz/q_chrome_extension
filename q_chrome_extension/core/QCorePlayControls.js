@@ -1,4 +1,4 @@
-// plugins/QCorePlayControls.js
+// core/QCorePlayControls.js
 (function () {
   // Prevent duplicate load
   if (window.QCorePlayControls) return;

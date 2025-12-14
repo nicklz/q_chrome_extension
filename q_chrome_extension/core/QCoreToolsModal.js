@@ -1,4 +1,4 @@
-// plugins/QCoreToolsModal.js
+// core/QCoreToolsModal.js
 // QCoreToolsModal — “[Tools]” popup (full fat, now with lazy-loading for QCorePeopleManager)
 // Fix: Clicking “People Manager” no longer fails with “QCorePeopleManager not loaded”.
 //      We add a robust lazy loader that injects /core/QCorePeopleManager.js (MV3-safe) and waits for window.QCorePeopleManager.

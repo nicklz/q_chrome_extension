@@ -1,4 +1,4 @@
-// plugins/QCoreTerminalModal.js
+// core/QCoreTerminalModal.js
 (function () {
     // QCoreTerminalModal — “[Files]” popup (projects/tickets light shell)
     if (window.QCoreTerminalModal) return;

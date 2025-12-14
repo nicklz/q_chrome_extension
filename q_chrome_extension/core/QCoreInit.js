@@ -1,4 +1,4 @@
-// plugins/QCoreInit.js
+// core/QCoreInit.js
 (function () {
   if (window.QCoreInit) return;
 

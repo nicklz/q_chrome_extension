@@ -1,4 +1,4 @@
-// plugins/QCoreStatusPanel.js
+// core/QCoreStatusPanel.js
 (function () {
     if (window.QCoreStatusPanel) return;
   
