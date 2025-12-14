@@ -1,0 +1,110 @@
+#!/usr/bin/env bash
+# iosfiximage
+# no critical data is lost
+#
+# App Store screenshot fixer:
+# - NEVER upscales
+# - If image is larger than target: resize down to fit within target (keeps aspect)
+# - Then pad/crop canvas to exact target using BLACK background (centered)
+# - If image is smaller than target: no resize, just pad to exact target with BLACK
+#
+# Target (Apple accepted): 1284x2778 (portrait)
+#
+# Usage:
+#   ./iosfiximage ~/Desktop/*
+#
+# Requirements:
+#   ImageMagick (convert, identify)
+
+set +e
+
+TARGET_W=1284
+TARGET_H=2778
+
+COUNTER=0
+PROCESSED=0
+
+if [ "$#" -eq 0 ]; then
+  echo "❌ usage: $0 <files...>"
+  exit 1
+fi
+
+command -v convert >/dev/null 2>&1 || { echo "❌ missing: convert (ImageMagick)"; exit 1; }
+command -v identify >/dev/null 2>&1 || { echo "❌ missing: identify (ImageMagick)"; exit 1; }
+
+echo "🚀 iOS screenshot fix started"
+echo "🎯 Target: ${TARGET_W}x${TARGET_H} (black background, centered, no upscale)"
+
+for INPUT in "$@"; do
+  if [ ! -f "$INPUT" ]; then
+    echo "⏭️ Skipping (not a file): $INPUT"
+    continue
+  fi
+
+  case "$INPUT" in
+    *.png|*.PNG) ;;
+    *)
+      echo "⏭️ Skipping (not png): $INPUT"
+      continue
+      ;;
+  esac
+
+  COUNTER=$((COUNTER + 1))
+
+  DIR="$(cd "$(dirname "$INPUT")" && pwd)"
+  TS="$(date +%s)"
+  OUTPUT="${DIR}/iosfixed_screenshot_${TS}_${COUNTER}.png"
+
+  echo "📥 [$COUNTER] Input: $INPUT"
+
+  # Read dimensions safely (macOS/bash 3.2)
+  DIMS="$(identify -format "%w %h" "$INPUT" 2>/dev/null)"
+  if [ $? -ne 0 ] || [ -z "$DIMS" ]; then
+    echo "🔥 identify failed: $INPUT"
+    continue
+  fi
+
+  IN_W="$(echo "$DIMS" | awk '{print $1}')"
+  IN_H="$(echo "$DIMS" | awk '{print $2}')"
+
+  echo "🔎 Size: ${IN_W}x${IN_H}"
+
+  # Rule:
+  # - If either dimension exceeds target, resize DOWN to fit inside target (no upscale) using ">"
+  # - Always then force exact canvas using black background + centered extent
+  #
+  # This yields exact target size with black padding where needed and center-crop/extent behavior.
+  if [ "$IN_W" -gt "$TARGET_W" ] || [ "$IN_H" -gt "$TARGET_H" ]; then
+    echo "📉 Larger than target → resizing down (keep aspect, no upscale)"
+    convert "$INPUT" \
+      -resize "${TARGET_W}x${TARGET_H}>" \
+      -background black \
+      -gravity center \
+      -extent "${TARGET_W}x${TARGET_H}" \
+      -units PixelsPerInch \
+      -density 72 \
+      "$OUTPUT"
+  else
+    echo "🧱 Smaller/equal → no resize, padding to target with black"
+    convert "$INPUT" \
+      -background black \
+      -gravity center \
+      -extent "${TARGET_W}x${TARGET_H}" \
+      -units PixelsPerInch \
+      -density 72 \
+      "$OUTPUT"
+  fi
+
+  if [ $? -ne 0 ]; then
+    echo "🔥 convert failed: $INPUT"
+    continue
+  fi
+
+  OUT_DIMS="$(identify -format "%w %h" "$OUTPUT" 2>/dev/null)"
+  echo "💾 Saved: $OUTPUT"
+  echo "✅ Output size: $OUT_DIMS"
+
+  PROCESSED=$((PROCESSED + 1))
+done
+
+echo "🏁 Done — processed $PROCESSED PNG file(s)"
