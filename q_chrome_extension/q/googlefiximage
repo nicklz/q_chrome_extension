@@ -1,0 +1,124 @@
+#!/usr/bin/env bash
+# googlefiximage
+# no critical data is lost
+#
+# Targets:
+#   440x280
+#   640x400
+#   1400x560
+#   128x128
+#
+# Rules (applied per target):
+# - NEVER upscales
+# - If image >= target in both dims: resize to cover, then CENTER-CROP
+# - If image smaller in either dim: NO resize, CENTER-PAD with BLACK
+# - IGNORE any PNG whose filename contains "google" (case-insensitive)
+# - Outputs saved next to input
+# - Filename includes size label
+#
+# Special rule for 128x128:
+# - If width >= 128: resize DOWN to width 128 first (no upscale), then CENTER-CROP/EXTENT to 128x128 with BLACK background
+# - If width < 128: NO resize, CENTER-PAD with BLACK to 128x128
+#
+# Output format:
+#   googlefixed_<WxH>_<unixtimestamp>_<n>.png
+#
+# Usage:
+#   ./googlefiximage ~/Desktop/*
+#
+# Requirements:
+#   ImageMagick (convert, identify)
+
+set +e
+
+SIZES=(
+  "440x280"
+  "640x400"
+  "1400x560"
+  "128x128"
+)
+
+COUNTER=0
+PROCESSED=0
+
+if [ "$#" -eq 0 ]; then
+  echo "❌ usage: $0 <files...>"
+  exit 1
+fi
+
+command -v convert >/dev/null 2>&1 || { echo "❌ missing: convert (ImageMagick)"; exit 1; }
+command -v identify >/dev/null 2>&1 || { echo "❌ missing: identify (ImageMagick)"; exit 1; }
+
+echo "🚀 Google image fix started"
+echo "🎯 Targets: 440x280, 640x400, 1400x560, 128x128"
+echo "🚫 Ignoring PNGs with 'google' in filename"
+
+for INPUT in "$@"; do
+  [ -f "$INPUT" ] || continue
+
+  BASENAME="$(basename "$INPUT")"
+  BASENAME_LOWER="$(printf '%s' "$BASENAME" | tr '[:upper:]' '[:lower:]')"
+
+  case "$BASENAME_LOWER" in
+    *google*) continue ;;
+  esac
+
+  EXT="${INPUT##*.}"
+  EXT_LOWER="$(printf '%s' "$EXT" | tr '[:upper:]' '[:lower:]')"
+  [ "$EXT_LOWER" = "png" ] || continue
+
+  DIRNAME="$(dirname "$INPUT")"
+
+  read W H <<<"$(identify -format '%w %h' "$INPUT" 2>/dev/null)"
+  [ -z "$W" ] && continue
+
+  for SIZE in "${SIZES[@]}"; do
+    TW="${SIZE%x*}"
+    TH="${SIZE#*x}"
+
+    TS="$(date +%s)"
+    COUNTER=$((COUNTER+1))
+    OUTPUT="${DIRNAME}/googlefixed_${SIZE}_${TS}_${COUNTER}.png"
+
+    if [ "$SIZE" = "128x128" ]; then
+      if [ "$W" -ge 128 ]; then
+        echo "🧩 ${BASENAME} → ${SIZE} (resize-to-128w + crop/pad)"
+        convert "$INPUT" \
+          -resize "128x" \
+          -background black \
+          -gravity center \
+          -extent "128x128" \
+          "$OUTPUT"
+      else
+        echo "⬛ ${BASENAME} → ${SIZE} (pad only)"
+        convert "$INPUT" \
+          -background black \
+          -gravity center \
+          -extent "128x128" \
+          "$OUTPUT"
+      fi
+      PROCESSED=$((PROCESSED+1))
+      continue
+    fi
+
+    if [ "$W" -ge "$TW" ] && [ "$H" -ge "$TH" ]; then
+      echo "✂️  ${BASENAME} → ${SIZE} (resize+crop)"
+      convert "$INPUT" \
+        -resize "${TW}x${TH}^" \
+        -gravity center \
+        -extent "${TW}x${TH}" \
+        "$OUTPUT"
+    else
+      echo "⬛ ${BASENAME} → ${SIZE} (pad only)"
+      convert "$INPUT" \
+        -background black \
+        -gravity center \
+        -extent "${TW}x${TH}" \
+        "$OUTPUT"
+    fi
+
+    PROCESSED=$((PROCESSED+1))
+  done
+done
+
+echo "✅ Done — generated ${PROCESSED} image(s)"
