@@ -1,0 +1,3 @@
+#!/bin/bash
+
+cp /home/nexus/sites/waypoints/nexus/scripts/skynet/data/* /home/nexus/sites/waypoints/nexus/scripts/skynet/public

@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" style="background:rgb(10,16,22);">
+  <defs>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="3.5" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <!-- Outer rounded window -->
+  <g filter="url(#glow)" fill="none" stroke="rgb(0,229,255)">
+    <!-- triple stroke for neon depth -->
+    <rect x="36" y="30" width="184" height="196" rx="26" ry="26" stroke-width="10"/>
+    <rect x="36" y="30" width="184" height="196" rx="26" ry="26" stroke-width="7" opacity="0.55"/>
+    <rect x="36" y="30" width="184" height="196" rx="26" ry="26" stroke-width="4" opacity="0.32"/>
+  </g>
+
+  <!-- Header dots -->
+  <g filter="url(#glow)" fill="none">
+    <circle cx="56" cy="54" r="5" stroke="rgb(255,42,109)" stroke-width="3"/>
+    <circle cx="72" cy="54" r="5" stroke="rgb(255,196,0)" stroke-width="3"/>
+    <circle cx="88" cy="54" r="5" stroke="rgb(0,229,255)" stroke-width="3"/>
+  </g>
+
+  <!-- Content lines -->
+  <g filter="url(#glow)" stroke-linecap="round">
+    <line x1="64" y1="90"  x2="196" y2="90"  stroke="rgb(255,42,109)" stroke-width="6"/>
+    <line x1="64" y1="114" x2="196" y2="114" stroke="rgb(0,229,255)"    stroke-width="6"/>
+    <line x1="64" y1="138" x2="196" y2="138" stroke="rgb(255,196,0)"  stroke-width="6"/>
+    <line x1="64" y1="162" x2="196" y2="162" stroke="rgb(0,229,255)"    stroke-width="6"/>
+    <line x1="64" y1="186" x2="148" y2="186" stroke="rgb(255,42,109)" stroke-width="6"/>
+  </g>
+
+  <!-- Bottom-left caret -->
+  <g filter="url(#glow)" fill="none" stroke="rgb(0,229,255)">
+    <polyline points="52,194 76,210 52,226" stroke-width="6"/>
+  </g>
+</svg>

@@ -1,0 +1,43 @@
+#!/bin/bash
+
+
+cd /home/nick/sites/waypoints && gitq && cd ~/rp4 && gitp && cd /home/nick/sites/waypoints/nexus/scripts/ReadyPlayerFour
+
+echo "BUILD COMPLETE - CHECK UNITY" | lolcat
+
+
+
+
+
+
+
+
+
+# # Stop UnrealEditor process
+# echo 'powershell.exe Stop-Process -Name "UnrealEditor"' | lolcat
+# powershell.exe Stop-Process -Name "UnrealEditor"  > /home/nick/sites/waypoints/nexus/scripts/ReadyPlayerFour/logs/gitqc.log
+# # Compile with Git and Make
+# echo "gitqc [Compile]" | lolcat
+# cd ~/sites/waypoints && gitq
+# if [ $? -ne 0 ]; then
+#     echo "🔴🔴🔴 ERROR 🔴🔴🔴 - gitq failed"
+#     exit 1
+# fi
+
+# cd ~/rp4 && gitp
+# if [ $? -ne 0 ]; then
+#     echo "🔴🔴🔴 ERROR 🔴🔴🔴 - gitp failed"
+#     exit 1
+# fi
+
+# cd /home/nick/sites/waypoints/nexus/scripts/ReadyPlayerFour/
+# make rebuild > /home/nick/sites/waypoints/nexus/q/q.log
+# if [ $? -ne 0 ]; then
+#     echo "🔴🔴🔴 ERROR 🔴🔴🔴 - make rebuild failed"
+#     cat /home/nick/sites/waypoints/nexus/q/q.log
+#     exit 1
+# fi
+
+
+# # # Open Unreal Editor
+# # explorer.exe "C:\Users\nkuhn\Documents\Unreal Projects\waypoints\nexus\scripts\ReadyPlayerFour\ReadyPlayerFour.uproject"

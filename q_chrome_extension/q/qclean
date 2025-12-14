@@ -1,0 +1,30 @@
+#!/bin/bash
+
+# Define the target directory
+TARGET_DIR="/home/nexus/sites/waypoints/nexus/scripts/skynet/data/"
+
+# Remove specified files
+echo "Removing files from $TARGET_DIR..."
+
+# Remove *.png files
+rm -f "${TARGET_DIR}"*.png
+
+# Remove *.html files
+rm -f "${TARGET_DIR}"*.html
+
+# Remove run*.json files
+rm -f "${TARGET_DIR}"run*.json
+
+# Remove *.mp4 files
+rm -f "${TARGET_DIR}"*.mp4
+
+# Remove *.mp3 files
+rm -f "${TARGET_DIR}"*.mp3
+
+# Remove *.mp3 files
+rm -f "${TARGET_DIR}"*.wav
+
+# Remove *.mp3 files
+rm -f "${TARGET_DIR}"*_output.log
+
+echo "Cleanup completed."

@@ -1,0 +1,95 @@
+#!/bin/bash
+
+# Function to clean up the input based on the specified type
+clean_input() {
+    local type="$1"
+    local input="$2"
+    local limit="$3"
+    local cleaned_input=""
+
+    # Check if size exceeds the limit
+    if [ -n "$limit" ]; then
+        if [ ${#input} -gt "$limit" ]; then
+            echo "false"
+            exit 0
+        fi
+    fi
+
+    # Clean up input based on type
+    case "$type" in
+        "string")
+            # Trim white space, new lines, and punctuation
+            cleaned_input=$(echo "$input" | tr -d '[:space:]' | tr -d '[:punct:]')
+            ;;
+        "object")
+            # Extract object using jq
+            cleaned_input=$(echo "$input" | jq -c . 2>/dev/null || echo "Invalid object")
+            ;;
+        "array")
+            # Extract array using another method (e.g., awk or jq)
+            cleaned_input=$(echo "$input" | jq -c . 2>/dev/null || echo "Invalid array")
+            ;;
+        *)
+            # Unsupported type, set cleaned_input to input
+            cleaned_input="$input"
+            ;;
+    esac
+
+    echo "$cleaned_input"
+}
+
+# Function to validate the cleaned input against the specified type
+validate_input() {
+    local type="$1"
+    local cleaned_input="$2"
+    local is_valid="false"
+
+    case "$type" in
+        "string")
+            # Validate the cleaned input as a string
+            if [ -n "$cleaned_input" ]; then
+                is_valid="true"
+            fi
+            ;;
+        "object")
+            # Validate the cleaned input as an object
+            if [ "$cleaned_input" != "Invalid object" ]; then
+                is_valid="true"
+            fi
+            ;;
+        "array")
+            # Validate the cleaned input as an array
+            if [ "$cleaned_input" != "Invalid array" ]; then
+                is_valid="true"
+            fi
+            ;;
+        "number")
+            # Validate the cleaned input as a number
+            if [[ "$cleaned_input" =~ ^[0-9]+$ ]]; then
+                is_valid="true"
+            fi
+            ;;
+    esac
+
+    echo "$is_valid"
+}
+
+
+# Main script logic
+type="$1"
+input="$2"
+limit="$3"
+
+# Debug output
+echo "Type: $type"
+echo "Input: $input"
+echo "Limit: $limit"
+
+# Clean up the input
+cleaned_input=$(clean_input "$type" "$input" "$limit")
+echo "Cleaned Input: $cleaned_input"
+
+# Validate the cleaned input against the specified type
+is_valid=$(validate_input "$type" "$cleaned_input")
+echo "Is Valid:" | lolcat
+echo "$is_valid" | figlet | lolcat

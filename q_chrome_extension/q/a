@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+
+# Load environment variables from the .env file
+ENV_FILE="$(dirname "$0")/../.env"
+
+if [ -f "$ENV_FILE" ]; then
+    export $(grep -v '^#' "$ENV_FILE" | xargs)
+fi
+
+# Ensure PROJECT_PATH is set
+if [ -z "$INSTALL_PATH" ]; then
+    echo "Error: PROJECT_PATH is not set in .env"
+    exit 1
+fi
+
+SCRIPT_PATH="$INSTALL_PATH/q/a.py"
+
+# Execute the script and log the output
+python3 "$SCRIPT_PATH" "$1" | sed 's/Answer://gi'

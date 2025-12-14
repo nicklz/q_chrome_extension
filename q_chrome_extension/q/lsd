@@ -1,0 +1,644 @@
+#!/bin/bash
+# =====================================================================================
+# 🤖 FILE DUMP — SUPER MODE (Legacy "lsd a" full-dump vs. Filtered "lsd a <filters>")
+# =====================================================================================
+# Fork rules (as required):
+#   • "lsd a"           => LEGACY MODE. Full tree dump + full/large cat prints + analytics.
+#                          This path NEVER shares selection/mismatch logic with filter mode.
+#   • "lsd a <filters>" => FILTER MODE. Exact path/basename matching, planned vs actual,
+#                          command verification (NO /tmp … artifacts), related files,
+#                          word clouds, n-grams, biggest files, longest/rarest token.
+#
+# Parsing rules for <filters> (in order):
+#   1) If the raw filter string looks like JSON array (starts '[' and ends ']'): parse JSON.
+#   2) Else split by commas, trim each token.
+#   3) Heuristic for unquoted CLI: if the second space-separated token looks like “name.ext”
+#      (exactly one dot, both sides alnum/_/-), count it as a valid filename token.
+# Planned count:
+#   • Increments for each token that “looks like a filename” (allows subpaths) — independent of existence.
+#   • Also increments for tokens that match any exact path or exact basename in the tree (normalized equality).
+#   • Never reduced by existence; e.g., "requirements.txt, test2.txt" => planned = 2.
+#
+# Directory tree:
+#   • Collapses node_modules/, vendor/, .terraform/, template*/ into one summary line each:
+#     “[# files; TOTAL_KB] Top3: <largest three basenames>”
+#
+# Printing:
+#   • Text files: full content unless >300KB (then first 300KB) but still in analytics.
+#   • JSON files: DO NOT print file contents; print Tag Cloud only (still included in analytics).
+#   • Binary-like extensions are listed but never cat’d.
+#
+# Final status line:
+#   • ✅ only if actual == planned (e.g., “✅ All file dumps complete. [N files total | N files guessed]”)
+#   • 🟡 otherwise, “🟡 All file dumps complete. [<actual> files total | <planned> files guessed]”
+#
+# Command Verification block:
+#   • COMMAND line shows a clean, human version:
+#       - LEGACY:   “lsd a”
+#       - FILTER:   “lsd a requirements.txt, README.md”
+#     (No /tmp paths, no internal function args, no “SELECTED filter”.)
+#   • Also shows “Planned files: <number>” and “[Q] Version 5.2”
+# =====================================================================================
+clear
+set -u
+
+# Capture a clean display of user's invocation for later (sanitized)
+SCRIPT_BASENAME="$(basename "$0")"
+RAW_ARGS="$*"
+
+echo -e "\n\n🚀✨🤖 FILE DUMP — SUPER MODE 🤖✨🚀"
+echo -e "📂 Scan Target: \033[1m.\033[0m ⏱ $(date '+%Y-%m-%d %H:%M:%S') 🧠 Analytics: ON"
+
+# ---------------------------------------------------------------------
+# Platform + constants
+# ---------------------------------------------------------------------
+SCAN_DIR="."
+OS_TYPE="$(uname)"
+IS_MAC=false
+IS_LINUX=false
+[[ "$OS_TYPE" == "Darwin" ]] && IS_MAC=true
+[[ "$OS_TYPE" == "Linux"  ]] && IS_LINUX=true
+
+# Exclusions (keep *.json INCLUDED)
+EXCLUDE_PATTERNS=(
+  "*/.git/*" "*/__pycache__/*" "*/env/*" "*/venv/*"
+  "*/*/env/*" "**/data/*" "*.png" "*.jpg"
+  "*/images/*" "*/files/*" "*/build/*" "*/.build/*"
+  "*/*/venv/*" "*/*env*/**" "*/.env/*" "*.build*"
+  "*/tts_env/*" "*/venv/*"
+  "*/v5/api/modules/contrib/*"
+  "./.cache/*"
+  "./node_modules/*"
+  "package-lock.json"
+  "./vendor/*"
+  "*.zip" "*.gz" "*.gzip" "*.glb"
+)
+
+# Binary-like extensions (never cat)
+BINARY_EXTENSIONS="jpg|jpeg|png|gif|bmp|ico|webp|pdf|mp3|mp4|mov|zip|tar|gz|gzip|bz2|xz|7z|exe|dll|so|dylib|bin|ttf|otf|woff|woff2|glb"
+
+# Convert exclusions to find switches
+EXCLUDES=()
+for PATTERN in "${EXCLUDE_PATTERNS[@]}"; do
+  EXCLUDES+=( -not -path "$PATTERN" )
+done
+
+# ---------------------------------------------------------------------
+# Collapsed directory tree (always first)
+# ---------------------------------------------------------------------
+print_directory_tree_collapsed() {
+  echo -e "\n📦 Directory Tree with File Sizes (in KB):\n"
+
+  declare -A BUCKET_COUNT
+  declare -A BUCKET_SIZE
+  declare -A BUCKET_TOP3 # "size|path" lines
+
+  detect_bucket() {
+    local p="$1"
+    local IFS='/'
+    read -ra parts <<< "${p#./}"
+    local cur="./"
+    for seg in "${parts[@]}"; do
+      cur="${cur%/}/$seg"
+      if [[ "$seg" == "node_modules" || "$seg" == "vendor" || "$seg" == ".terraform" || "$seg" == template* ]]; then
+        echo "$cur/"
+        return 0
+      fi
+    done
+    echo ""
+  }
+
+  while IFS= read -r -d '' file; do
+    [[ -f "$file" ]] || continue
+    local_size_kb=$(du -k "$file" | cut -f1)
+    bucket="$(detect_bucket "$file")"
+    if [[ -n "$bucket" ]]; then
+      BUCKET_COUNT["$bucket"]=$(( ${BUCKET_COUNT["$bucket"]:-0} + 1 ))
+      BUCKET_SIZE["$bucket"]=$(( ${BUCKET_SIZE["$bucket"]:-0} + local_size_kb ))
+      entry="$(printf "%012d|%s" "$local_size_kb" "$file")"
+      BUCKET_TOP3["$bucket"]+="${entry}"$'\n'
+    else
+      printf "%s [%sKB]\n" "$file" "$local_size_kb"
+    fi
+  done < <(find "$SCAN_DIR" -type f "${EXCLUDES[@]}" -print0 | sort -z)
+
+  for b in "${!BUCKET_COUNT[@]}"; do
+    top3="$(printf "%s" "${BUCKET_TOP3["$b"]}" | sed '/^$/d' | sort -r | head -n 3 | cut -d'|' -f2-)"
+    t1="$(echo "$top3" | sed -n '1p' | awk -F/ '{print $NF}')"
+    t2="$(echo "$top3" | sed -n '2p' | awk -F/ '{print $NF}')"
+    t3="$(echo "$top3" | sed -n '3p' | awk -F/ '{print $NF}')"
+    printf "%s [#%d files; %sKB] Top3: %s%s%s\n" \
+      "$b" "${BUCKET_COUNT["$b"]}" "${BUCKET_SIZE["$b"]}" \
+      "${t1:-—}" \
+      "${t2:+, $t2}" \
+      "${t3:+, $t3}"
+  done
+}
+
+# ---------------------------------------------------------------------
+# Helpers (shared)
+# ---------------------------------------------------------------------
+MAX_PRINT_BYTES=$((300 * 1024))
+TOP_WORDS_COUNT=10
+TOP_NGRAMS=3
+TOP_RELATED_FILES=3
+TOP_RELATED_WORDS=3
+TOP_BIGGEST_FILES=3
+TOP_BIGGEST_WORDS=3
+PER_FILE_WORDS=8
+
+have_cmd() { command -v "$1" >/dev/null 2>&1; }
+
+normalize_text() {
+  tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9_]/ /g' | tr -s '[:space:]' '\n' | sed '/^$/d'
+}
+
+filesize_bytes() {
+  if du -b "$1" >/dev/null 2>&1; then du -b "$1" | cut -f1
+  else wc -c < "$1" | tr -d ' '
+  fi
+}
+
+fullpath_of() {
+  local f="$1"
+  if have_cmd realpath; then realpath "$f"
+  else
+    (cd "$(dirname "$f")" 2>/dev/null && printf "%s/%s\n" "$(pwd)" "$(basename "$f")")
+  fi
+}
+
+is_binary_by_ext() { [[ "$1" =~ \.($BINARY_EXTENSIONS)$ ]] ; }
+is_json_file() { [[ "$1" =~ \.json$ ]]; }
+
+word_counts_file() {
+  normalize_text < "$1" \
+  | awk '{f[$0]++} END{for(w in f) print w, f[w]}' \
+  | sort -k2,2nr -k1,1
+}
+
+ngrams_scored() {
+  awk '
+    {
+      n=split(tolower($0), raw, /[^a-z0-9_]+/); m=0;
+      for(i=1;i<=n;i++) if(raw[i]!="") a[++m]=raw[i];
+      for(i=1;i<=m;i++){
+        seq="";
+        for(k=1;k<=5 && i+k-1<=m;k++){
+          if(seq=="") seq=a[i]; else seq=seq" "a[i+k-1];
+          c[seq]++; L[seq]=k;
+        }
+      }
+      delete a
+    }
+    END{
+      for(k in c){
+        sc=c[k] + 10*L[k];
+        print k, sc, c[k], L[k];
+      }
+    }' \
+  | sort -k2,2nr -k3,3nr
+}
+
+longest_rarest_token() {
+  normalize_text \
+  | awk '{f[$0]++} END{max=0;best="";for(w in f){if(f[w]==1 && length(w)>max){max=length(w);best=w}} if(best!="")print best}'
+}
+
+build_all_files_array() {
+  ALL_FILES=()
+  while IFS= read -r -d '' file; do
+    ALL_FILES+=("$file")
+  done < <(find "$SCAN_DIR" -type f "${EXCLUDES[@]}" -print0 | sort -z)
+}
+
+all_matches_by_basename() {
+  local base="$1"
+  for f in "${ALL_FILES[@]}"; do
+    [[ "${f##*/}" == "$base" ]] && echo "$f"
+  done
+}
+
+# Normalize leading "./" away for consistent comparisons
+strip_leading_dotslash() {
+  local v="$1"
+  [[ "$v" == ./* ]] && echo "${v:2}" || echo "$v"
+}
+
+# Filename-like (accept single file or subpath with at least one dot — name and ext are [A-Za-z0-9_-])
+# Accepts:
+#   name.ext
+#   ./name.ext
+#   path/to/name.ext
+#   ./path/to/name.ext
+is_clean_filename() {
+  local t="$1"
+  [[ "$t" =~ ^[.\/]*[A-Za-z0-9_\-\/]+\.([A-Za-z0-9_\-]+)$ ]]
+}
+
+# Parse filter tokens from raw string per rules
+parse_filter_tokens_from_args() {
+  local raw="$*"
+  # Rule 1: JSON-looking array?
+  if [[ "$raw" =~ ^[[:space:]]*\[.*\][[:space:]]*$ ]]; then
+    if command -v python3 >/dev/null 2>&1; then
+      python3 - << 'PY' 2>/dev/null <<< "$raw"
+import json,sys
+try:
+    arr=json.loads(sys.stdin.read())
+    if isinstance(arr,list):
+        for x in arr:
+            if x is None: continue
+            s=str(x).strip()
+            if s: print(s)
+except Exception:
+    pass
+PY
+      return 0
+    fi
+  fi
+  # Rule 2: comma split
+  echo "$raw" \
+  | tr -d '\r' \
+  | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' \
+  | awk 'BEGIN{RS=","; ORS="\n"} {gsub(/^[[:space:]]+|[[:space:]]+$/, "", $0); if(length($0)) print $0}'
+}
+
+# Heuristic: second space-separated token looks like filename (one dot)
+second_piece_looks_like_filename() {
+  local raw="$*"
+  local t1 t2
+  read -r t1 t2 _ <<< "$raw"
+  [[ -n "${t2:-}" ]] || return 1
+  if [[ "$t2" =~ ^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$ ]]; then
+    return 0
+  fi
+  return 1
+}
+
+# ---------------------------------------------------------------------
+# Big per-file header (figlet + lolcat if present) + meta (size, path, tag cloud)
+# ---------------------------------------------------------------------
+print_file_header_banner() {
+  local FILE="$1"
+  local SIZE_KB="$2"
+  local SIZE_BYTES
+  SIZE_BYTES="$(filesize_bytes "$FILE" 2>/dev/null || echo 0)"
+  local FULLPATH
+  FULLPATH="$(fullpath_of "$FILE")"
+  local BASENAME="${FILE##*/}"
+
+  echo
+  echo "════════════════════════════════════════════════════════════════════════════════"
+  if have_cmd figlet; then
+    if have_cmd lolcat; then
+      figlet -w 120 "$BASENAME" | lolcat
+    else
+      figlet -w 120 "$BASENAME"
+    fi
+  else
+    printf "=== %s ===\n" "$BASENAME"
+  fi
+
+  echo "📄 Path: $FULLPATH"
+  echo "📏 Size: ${SIZE_KB}KB (${SIZE_BYTES} bytes)"
+  if ! is_binary_by_ext "$FILE" && file "$FILE" | grep -qE 'text'; then
+    echo "☁️  Tag Cloud (top ${PER_FILE_WORDS}):"
+    word_counts_file "$FILE" | head -n "$PER_FILE_WORDS" | awk '{printf "  %-20s %s\n",$1,$2}'
+  else
+    echo "☁️  Tag Cloud: (binary-like; skipped)"
+  fi
+  echo "────────────────────────────────────────────────────────────────────────────────"
+}
+
+# ---------------------------------------------------------------------
+# Analytics + verification footer (parametrized, no /tmp leakage)
+#   Args:
+#     $1 -> path to TMP_ALL_TEXT (may be empty)
+#     $2 -> array name of SELECTED files (for biggest files stats)
+#     $3 -> related-mode ("filter" | "none")
+#     $4 -> display command (pretty, e.g., "lsd a requirements.txt, README.md")
+#     $5 -> planned count to display (or "—")
+# ---------------------------------------------------------------------
+print_analytics_and_verification() {
+  local TMP_ALL_TEXT="$1"
+  local -n SEL_ARR="$2"
+  local RELATED_MODE="$3"
+  local DISPLAY_CMD="$4"
+  local DISPLAY_PLANNED="$5"
+
+  echo -e "\n════════════════════════════════════════════════════════════════════════════════"
+  echo "🧩 RELATED FILES & ANALYTICS"
+  echo "════════════════════════════════════════════════════════════════════════════════"
+
+  if [[ "$RELATED_MODE" == "filter" ]]; then
+    build_all_files_array
+    local after=""; after="${DISPLAY_CMD#lsd a }"
+    mapfile -t TOKS < <(parse_filter_tokens_from_args "$after")
+
+    RELATED_CAND=()
+    if ((${#TOKS[@]} > 0)); then
+      for f in "${ALL_FILES[@]}"; do
+        local skip=false
+        for s in "${SEL_ARR[@]}"; do
+          [[ "$f" == "$s" ]] && { skip=true; break; }
+        done
+        $skip && continue
+        for t in "${TOKS[@]}"; do
+          base="${t##*/}"
+          [[ -z "$base" ]] && continue
+          shopt -s nocasematch
+          if [[ "$f" == *"$base"* ]]; then
+            RELATED_CAND+=("$f")
+            shopt -u nocasematch
+            break
+          fi
+          shopt -u nocasematch
+        done
+      done
+    fi
+
+    if ((${#RELATED_CAND[@]} > 0)); then
+      TMP_REL=$(mktemp)
+      for r in "${RELATED_CAND[@]}"; do echo "$r"; done | awk '!seen[$0]++' | head -n $TOP_RELATED_FILES > "$TMP_REL"
+      echo "Top $TOP_RELATED_FILES Related:"
+      while IFS= read -r rf; do
+        echo "• $rf"
+        if is_binary_by_ext "$rf"; then
+          echo " (binary-like; mini wordcloud skipped)"
+        else
+          word_counts_file "$rf" | head -n $TOP_RELATED_WORDS | awk '{printf " %-20s %s\n",$1,$2}'
+        fi
+      done < "$TMP_REL"
+      rm -f "$TMP_REL"
+    else
+      echo "(No related files found.)"
+    fi
+  else
+    echo "(No related files — legacy full-dump has no filters.)"
+  fi
+
+  if [[ -s "$TMP_ALL_TEXT" ]]; then
+    echo -e "\n📈 Top $TOP_WORDS_COUNT Words (selected files):"
+    TMP_WORDS=$(mktemp)
+    normalize_text < "$TMP_ALL_TEXT" | awk '{f[$0]++} END{for(w in f) print w, f[w]}' | sort -k2,2nr -k1,1 > "$TMP_WORDS"
+    head -n $TOP_WORDS_COUNT "$TMP_WORDS" | awk '{printf " %-20s %s\n",$1,$2}'
+
+    echo -e "\n🧬 Top $TOP_NGRAMS N-Gram Chains (score=count+10*len, up to len=5):"
+    TMP_NG=$(mktemp)
+    ngrams_scored < "$TMP_ALL_TEXT" > "$TMP_NG"
+    head -n $TOP_NGRAMS "$TMP_NG" | awk '{printf " %-2s %-60s score=%s count=%s len=%s\n", NR".", $1, $2, $3, $4}'
+
+    echo -e "\n🏋️ BIGGEST $TOP_BIGGEST_FILES FILES — TOP $TOP_BIGGEST_WORDS words"
+    TMP_SIZES=$(mktemp)
+    for f in "${SEL_ARR[@]}"; do
+      [ -f "$f" ] || continue
+      printf "%015d\t%s\n" "$(filesize_bytes "$f")" "$f" >> "$TMP_SIZES"
+    done
+    if [ -s "$TMP_SIZES" ]; then
+      sort -r "$TMP_SIZES" | head -n $TOP_BIGGEST_FILES | cut -f2- | while read -r bf; do
+        echo "• $bf"
+        if is_binary_by_ext "$bf"; then
+          echo " (binary-like; wordcloud skipped)"
+        else
+          word_counts_file "$bf" | head -n $TOP_BIGGEST_WORDS | awk '{printf " %-20s %s\n",$1,$2}'
+        fi
+      done
+    else
+      echo "(No selected files to analyze for biggest files.)"
+    fi
+    rm -f "$TMP_WORDS" "$TMP_NG" "$TMP_SIZES"
+  else
+    echo -e "\n(No analyzable text from selected files.)"
+  fi
+
+  echo -e "\n🧪 Command Verification:"
+  echo " COMMAND: $DISPLAY_CMD"
+  echo " Planned files: $DISPLAY_PLANNED"
+  echo -e "\n🔖 [Q] Version 5.2"
+  echo -e "\n🧿 Rarest / Longest Unique Token:"
+  if [[ -s "$TMP_ALL_TEXT" ]]; then
+    RAREST_LONGEST="$(longest_rarest_token < "$TMP_ALL_TEXT")"
+  else
+    RAREST_LONGEST=""
+  fi
+  if [[ -n "$RAREST_LONGEST" ]]; then
+    echo " guess which longest rarest word of the day is: $RAREST_LONGEST"
+  else
+    echo " guess which longest rarest word of the day is: (none found)"
+  fi
+}
+
+# ---------------------------------------------------------------------
+# Always print collapsed tree first
+# ---------------------------------------------------------------------
+print_directory_tree_collapsed
+
+# ---------------------------------------------------------------------
+# MODE SWITCH
+#   • LEGACY: first arg == "a" and $# == 1
+#   • FILTER: first arg == "a" and $# >= 2
+#   • Otherwise: end after tree.
+# ---------------------------------------------------------------------
+if [[ "$#" -gt 0 ]]; then
+  SCOPE="$1"
+
+  if [[ "$SCOPE" == "a" && "$#" -eq 1 ]]; then
+    # =========================
+    # LEGACY MODE: "lsd a"
+    # =========================
+    echo -e "\n🌈 Enhanced Dump Mode Triggered (LEGACY — full dump)\n"
+
+    build_all_files_array
+    FILE_COUNT="${#ALL_FILES[@]}"
+
+    if have_cmd figlet && have_cmd lolcat; then
+      echo "$FILE_COUNT FILES FOUND" | figlet | lolcat
+    else
+      echo -e "\n📦 Total files found: $FILE_COUNT"
+    fi
+
+    echo -e "\n📚 FILES IN ORDER (LEGACY FULL MODE):"
+    echo "════════════════════════════════════════════════════════════════════════════════"
+
+    TMP_ALL_TEXT="$(mktemp)"
+    SELECTED=()
+
+    if [ "$FILE_COUNT" -eq 0 ]; then
+      echo "🚫 No files found."
+    else
+      for FILE in "${ALL_FILES[@]}"; do
+        FILE_SIZE_KB=$(du -k "$FILE" | cut -f1)
+        print_file_header_banner "$FILE" "$FILE_SIZE_KB"
+
+        SELECTED+=("$FILE")
+
+        if is_json_file "$FILE"; then
+          # JSON: print NO contents, but still include in analytics buffer (capped) and show tag cloud above
+          SIZE_BYTES=$(filesize_bytes "$FILE")
+          echo "⚠️ JSON file — printing Tag Cloud only; contents suppressed."
+          if [ "$SIZE_BYTES" -gt "$MAX_PRINT_BYTES" ]; then
+            { echo; head -c "$MAX_PRINT_BYTES" "$FILE"; echo; } >> "$TMP_ALL_TEXT"
+          else
+            { echo; cat "$FILE"; echo; } >> "$TMP_ALL_TEXT"
+          fi
+        elif is_binary_by_ext "$FILE"; then
+          echo "⚠️ Skipping image or binary file by extension."
+        elif file "$FILE" | grep -qE 'text'; then
+          SIZE_BYTES=$(filesize_bytes "$FILE")
+          if [ "$SIZE_BYTES" -gt "$MAX_PRINT_BYTES" ]; then
+            echo "⚠️ Large file (>300KB). Displaying partial content."
+            head -c "$MAX_PRINT_BYTES" "$FILE"
+            { echo; head -c "$MAX_PRINT_BYTES" "$FILE"; echo; } >> "$TMP_ALL_TEXT"
+          else
+            echo "(Full file content below):"
+            cat "$FILE"
+            { echo; cat "$FILE"; echo; } >> "$TMP_ALL_TEXT"
+          fi
+        else
+          echo "⚠️ Skipping binary or non-text file."
+        fi
+
+        echo -e "\n────────────────────────────────────────────────────────────────────────────────"
+      done
+    fi
+
+    DISPLAY_CMD="lsd a"
+    print_analytics_and_verification "$TMP_ALL_TEXT" SELECTED "none" "$DISPLAY_CMD" "—"
+    rm -f "$TMP_ALL_TEXT"
+
+    ACTUAL_COUNT="${#SELECTED[@]}"
+    # Legacy has no planned logic; mirror total as "guessed" to satisfy the format without sharing logic
+    echo -e "\n✅ All file dumps complete. [$ACTUAL_COUNT files total | $ACTUAL_COUNT files guessed]\n"
+    exit 0
+  fi
+
+  if [[ "$SCOPE" == "a" && "$#" -ge 2 ]]; then
+    # =========================
+    # FILTER MODE: "lsd a <filters...>"
+    # =========================
+    FILTER_RAW="${*:2}"   # everything after "a"
+
+    build_all_files_array
+
+    # Tokenize per rules (JSON first; else comma list)
+    mapfile -t FILTER_TOKENS < <(parse_filter_tokens_from_args "$FILTER_RAW")
+
+    # If user provided unquoted second arg (space-delimited) like: lsd a requirements.txt
+    if [[ "${#FILTER_TOKENS[@]}" -eq 0 ]] && second_piece_looks_like_filename "$FILTER_RAW"; then
+      read -r _ second _ <<< "$FILTER_RAW"
+      FILTER_TOKENS+=("$second")
+    fi
+
+    # Build a canonical display string for the COMMAND line (no /tmp, no internal args)
+    if ((${#FILTER_TOKENS[@]} > 0)); then
+      DISPLAY_FILTERS="$(printf "%s\n" "${FILTER_TOKENS[@]}" | paste -sd', ' -)"
+    else
+      DISPLAY_FILTERS="$(echo "$FILTER_RAW" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+    fi
+    DISPLAY_CMD="lsd a ${DISPLAY_FILTERS}"
+
+    # Planned selection — broadened and normalized (counts filename-ish tokens regardless of existence)
+    PLANNED_COUNT=0
+    for t in "${FILTER_TOKENS[@]}"; do
+      if is_clean_filename "$t"; then
+        PLANNED_COUNT=$((PLANNED_COUNT+1))
+        continue
+      fi
+      found=0
+      for f in "${ALL_FILES[@]}"; do
+        nf="$(strip_leading_dotslash "$f")"
+        nt="$(strip_leading_dotslash "$t")"
+        if [[ "$f" == "$t" || "$nf" == "$nt" || "${f##*/}" == "$t" ]]; then
+          found=1; break
+        fi
+      done
+      [[ "$found" -eq 1 ]] && PLANNED_COUNT=$((PLANNED_COUNT+1))
+    done
+
+    echo -e "\n🧭 Scope: \033[1m$SCOPE\033[0m 🎯 Filters: \033[1m${DISPLAY_FILTERS:-<none>}\033[0m 📊 Planned selection: \033[1m$PLANNED_COUNT\033[0m"
+    echo -e "\n📚 FILES IN ORDER (FILTER MODE):"
+    echo "════════════════════════════════════════════════════════════════════════════════"
+
+    # Selection: exact PATH (normalized) plus ALL exact BASENAME matches (no substring fallback)
+    SELECTED=()
+    if ((${#FILTER_TOKENS[@]} > 0)); then
+      # exact paths (normalized both sides)
+      for t in "${FILTER_TOKENS[@]}"; do
+        nt="$(strip_leading_dotslash "$t")"
+        for f in "${ALL_FILES[@]}"; do
+          nf="$(strip_leading_dotslash "$f")"
+          [[ "$f" == "$t" || "$nf" == "$nt" ]] && SELECTED+=("$f")
+        done
+      done
+      # ALL basenames that match
+      for t in "${FILTER_TOKENS[@]}"; do
+        base="${t##*/}"
+        while IFS= read -r m; do
+          [[ -n "$m" ]] && SELECTED+=("$m")
+        done < <(all_matches_by_basename "$base")
+      done
+      # de-dup (preserve order)
+      if ((${#SELECTED[@]} > 0)); then
+        TMP_SEL=$(mktemp)
+        for s in "${SELECTED[@]}"; do echo "$s"; done | awk '!seen[$0]++' > "$TMP_SEL"
+        mapfile -t SELECTED < "$TMP_SEL"
+        rm -f "$TMP_SEL"
+      fi
+    fi
+
+    TMP_ALL_TEXT="$(mktemp)"
+    if ((${#SELECTED[@]} == 0)); then
+      echo "🚫 Filter matched no files."
+    else
+      for FILE in "${SELECTED[@]}"; do
+        FILE_SIZE_KB=$(du -k "$FILE" | cut -f1)
+        print_file_header_banner "$FILE" "$FILE_SIZE_KB"
+
+        if is_json_file "$FILE"; then
+          SIZE_BYTES=$(filesize_bytes "$FILE")
+          echo "⚠️ JSON file — printing Tag Cloud only; contents suppressed."
+          if [ "$SIZE_BYTES" -gt "$MAX_PRINT_BYTES" ]; then
+            { echo; head -c "$MAX_PRINT_BYTES" "$FILE"; echo; } >> "$TMP_ALL_TEXT"
+          else
+            { echo; cat "$FILE"; echo; } >> "$TMP_ALL_TEXT"
+          fi
+        elif is_binary_by_ext "$FILE"; then
+          echo "⚠️ Skipping image or binary file by extension."
+        elif file "$FILE" | grep -qE 'text'; then
+          SIZE_BYTES=$(filesize_bytes "$FILE")
+          if [ "$SIZE_BYTES" -gt "$MAX_PRINT_BYTES" ]; then
+            echo "⚠️ Large file (>300KB). Displaying partial content."
+            head -c "$MAX_PRINT_BYTES" "$FILE"
+            { echo; head -c "$MAX_PRINT_BYTES" "$FILE"; echo; } >> "$TMP_ALL_TEXT"
+          else
+            echo "(Full file content below):"
+            cat "$FILE"
+            { echo; cat "$FILE"; echo; } >> "$TMP_ALL_TEXT"
+          fi
+        else
+          echo "⚠️ Skipping binary or non-text file."
+        fi
+
+        echo -e "\n────────────────────────────────────────────────────────────────────────────────"
+      done
+    fi
+
+    # Footer (filter mode) — NO /tmp in COMMAND
+    print_analytics_and_verification "$TMP_ALL_TEXT" SELECTED "filter" "$DISPLAY_CMD" "$PLANNED_COUNT"
+    rm -f "$TMP_ALL_TEXT"
+
+    ACTUAL_COUNT="${#SELECTED[@]}"
+    if [[ "$ACTUAL_COUNT" -eq "$PLANNED_COUNT" ]]; then
+      echo -e "\n✅ All file dumps complete. [$ACTUAL_COUNT files total | $PLANNED_COUNT files guessed]\n"
+    else
+      echo -e "\n🟡 All file dumps complete. [$ACTUAL_COUNT files total | $PLANNED_COUNT files guessed]\n"
+    fi
+    exit 0
+  fi
+
+  # Any other scope: end after tree
+  exit 0
+else
+  # No args: only collapsed tree shown.
+  exit 0
+fi

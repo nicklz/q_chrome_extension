@@ -1,0 +1,120 @@
+rm -rf "/mnt/c/Users/nkuhn/Documents/Unreal Projects/waypoints/nexus/scripts/ReadyPlayerFour/Saved"
+rm -rf "/mnt/c/Users/nkuhn/Documents/Unreal Projects/waypoints/nexus/scripts/ReadyPlayerFour/Intermediate"
+rm -rf "/mnt/c/Users/nkuhn/Documents/Unreal Projects/waypoints/nexus/scripts/ReadyPlayerFour/Binaries"
+rm -rf "/mnt/c/Users/nkuhn/Documents/Unreal Projects/waypoints/nexus/scripts/ReadyPlayerFour/DerivedDataCache"
+/mnt/c/Program\ Files/Epic\ Games/UE_5.5/Engine/Binaries/DotNET/UnrealBuildTool/UnrealBuildTool.exe -projectfiles -project="C:\Users\nkuhn\Documents\Unreal Projects\waypoints\nexus\scripts\ReadyPlayerFour\ReadyPlayerFour.uproject" -game -engine
+Log file: C:\Users\nkuhn\AppData\Local\UnrealBuildTool\Log_GPF.txt
+
+Generating VisualStudio project files:
+Discovering modules, targets and source code for project...
+Available x64 toolchains (1):
+ * C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.43.34808
+    (Family=14.43.34808, FamilyRank=1, Version=14.43.34808, Is64Bit=True, ReleaseChannel=Latest, Architecture=x64)
+Visual Studio 2022 compiler version 14.43.34808 is not a preferred version. Please use the latest preferred version 14.38.33130
+Binding IntelliSense data...
+Exception while generating include data for UnrealEditor: System.ArgumentNullException: Value cannot be null. (Parameter 'element')
+   at System.ArgumentNullException.Throw(String paramName)
+   at System.Attribute.GetCustomAttributes(MemberInfo element, Type attributeType, Boolean inherit)
+   at System.Reflection.CustomAttributeExtensions.GetCustomAttributes[T](MemberInfo element)
+   at UnrealBuildTool.ModuleRules.IsValidForTarget(Type moduleType, ReadOnlyTargetRules targetRules, String& invalidReason) in D:\build\++UE5\Sync\Engine\Saved\CsTools\Engine\Source\Programs\UnrealBuildTool\Configuration\ModuleRules.cs:line 1680
+   at UnrealBuildTool.UEBuildTarget.AddAllValidModulesToTarget(ILogger Logger) in D:\build\++UE5\Sync\Engine\Saved\CsTools\Engine\Source\Programs\UnrealBuildTool\Configuration\UEBuildTarget.cs:line 4266
+   at UnrealBuildTool.UEBuildTarget.PreBuildSetup(ILogger Logger) in D:\build\++UE5\Sync\Engine\Saved\CsTools\Engine\Source\Programs\UnrealBuildTool\Configuration\UEBuildTarget.cs:line 3720
+   at UnrealBuildTool.UEBuildTarget.Create(TargetDescriptor Descriptor, Boolean bSkipRulesCompile, Boolean bForceRulesCompile, Boolean bUsePrecompiled, UnrealIntermediateEnvironment IntermediateEnvironment, ILogger Logger) in D:\build\++UE5\Sync\Engine\Saved\CsTools\Engine\Source\Programs\UnrealBuildTool\Configuration\UEBuildTarget.cs:line 1390
+   at UnrealBuildTool.ProjectFileGenerator.GenerateIntelliSenseData(String[] Arguments, List`1 Targets, ILogger Logger) in D:\build\++UE5\Sync\Engine\Saved\CsTools\Engine\Source\Programs\UnrealBuildTool\ProjectFiles\ProjectFileGenerator.cs:line 2176
+C:\Users\nkuhn\Documents\Unreal Projects\waypoints\nexus\scripts\ReadyPlayerFour\Source\ReadyPlayerFourModule\ReadyPlayerFourModule.Build.cs: warning: Referenced directory 'C:\Users\nkuhn\Documents\Unreal Projects\waypoints\nexus\scripts\ReadyPlayerFour\Source\ReadyPlayerFourModule\Animations' does not exist.
+Binding IntelliSense data... 100%
+Writing project files... 100%
+
+Generating QueryTargets data for editor...
+Total execution time: 5.05 seconds
+/mnt/c/Program\ Files/Epic\ Games/UE_5.5/Engine/Binaries/DotNET/UnrealBuildTool/UnrealBuildTool.exe Development Win64 -Project="C:\Users\nkuhn\Documents\Unreal Projects\waypoints\nexus\scripts\ReadyPlayerFour\ReadyPlayerFour.uproject" -Target=ReadyPlayerFour
+Log file: C:\Users\nkuhn\AppData\Local\UnrealBuildTool\Log.txt
+Creating makefile for ReadyPlayerFour (no existing makefile)
+Available x64 toolchains (1):
+ * C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.43.34808
+    (Family=14.43.34808, FamilyRank=1, Version=14.43.34808, Is64Bit=True, ReleaseChannel=Latest, Architecture=x64)
+Visual Studio 2022 compiler version 14.43.34808 is not a preferred version. Please use the latest preferred version 14.38.33130
+C:\Users\nkuhn\Documents\Unreal Projects\waypoints\nexus\scripts\ReadyPlayerFour\Source\ReadyPlayerFourModule\ReadyPlayerFourModule.Build.cs: warning: Referenced directory 'C:\Users\nkuhn\Documents\Unreal Projects\waypoints\nexus\scripts\ReadyPlayerFour\Source\ReadyPlayerFourModule\Animations' does not exist.
+Parsing headers for ReadyPlayerFour
+  Running Internal UnrealHeaderTool "C:\Users\nkuhn\Documents\Unreal Projects\waypoints\nexus\scripts\ReadyPlayerFour\ReadyPlayerFour.uproject" "C:\Users\nkuhn\Documents\Unreal Projects\waypoints\nexus\scripts\ReadyPlayerFour\Intermediate\Build\Win64\ReadyPlayerFour\Development\ReadyPlayerFour.uhtmanifest" -WarningsAsErrors -installed
+Total of 46 written
+Reflection code generated for ReadyPlayerFour in 0.6071341 seconds
+Building ReadyPlayerFour...
+Using Visual Studio 2022 14.43.34808 toolchain (C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.43.34808) and Windows 10.0.22621.0 SDK (C:\Program Files (x86)\Windows Kits\10).
+Warning: Visual Studio 2022 compiler is not a preferred version
+Determining max actions to execute in parallel (24 physical cores, 32 logical cores)
+  Executing up to 24 processes, one per physical core
+Using Unreal Build Accelerator local executor to run 66 action(s)
+  Storage capacity 40Gb
+---- Starting trace: 250228_134124 ----
+UbaSessionServer - Disable remote execution (remote sessions will finish current processes)
+------ Building 66 action(s) started ------
+[1/66] Copy tbb.dll
+[2/66] Copy boost_system-mt-x64.dll
+[3/66] Copy boost_python311-mt-x64.dll
+[4/66] Copy boost_chrono-mt-x64.dll
+[5/66] Copy boost_atomic-mt-x64.dll
+[6/66] Copy boost_regex-mt-x64.dll
+[7/66] Copy boost_filesystem-mt-x64.dll
+[8/66] Copy tbbmalloc.pdb
+[9/66] Copy tbb.pdb
+[10/66] Copy D3D12Core.dll
+[11/66] Copy boost_iostreams-mt-x64.dll
+[12/66] Copy tbbmalloc.dll
+[13/66] Copy d3d12SDKLayers.dll
+[14/66] Copy boost_thread-mt-x64.dll
+[15/66] Copy boost_program_options-mt-x64.dll
+[16/66] Copy DirectML.dll
+[17/66] Resource Default.rc2
+[18/66] Compile [x64] SharedPCH.Engine.Project.ValApi.Cpp20.cpp
+[19/66] Compile [x64] PhysicsSimActor.cpp
+[20/66] Compile [x64] PhysicsSimActor.gen.cpp
+[21/66] Compile [x64] LoggingActor.gen.cpp
+[22/66] Compile [x64] DestructibleActor.gen.cpp
+[23/66] Compile [x64] LoggingActor.cpp
+[24/66] Compile [x64] PlasmaPistol.cpp
+[25/66] Compile [x64] DestructibleActor.cpp
+[26/66] Compile [x64] PersistenceManager.cpp
+[27/66] Compile [x64] PersistenceManager.gen.cpp
+[28/66] Compile [x64] PlasmaPistolActor.gen.cpp
+[29/66] Compile [x64] ProjectilePlasmaBolt.gen.cpp
+[30/66] Compile [x64] GameSettingsManager.cpp
+[31/66] Compile [x64] PlasmaPistol.gen.cpp
+[32/66] Compile [x64] CrosshairWidget.gen.cpp
+[33/66] Compile [x64] FormattedChatWidget.cpp
+[34/66] Compile [x64] FormattedChatWidget.gen.cpp
+[35/66] Compile [x64] MainMenuWidget.gen.cpp
+[36/66] Compile [x64] AIPlayerController.gen.cpp
+[37/66] Compile [x64] GameMenuWidget.gen.cpp
+[38/66] Compile [x64] InGameHUD.gen.cpp
+[39/66] Compile [x64] AIBridgeActor.cpp
+[40/66] Compile [x64] CrosshairWidget.cpp
+[41/66] Compile [x64] ReadyPlayerFourModule.init.gen.cpp
+[42/66] Compile [x64] AIBridgeActor.gen.cpp
+[43/66] Compile [x64] ReadyPlayerFour.cpp
+[44/66] Compile [x64] UDamageableInterface.gen.cpp
+[45/66] Compile [x64] TVScreenActor.gen.cpp
+[46/66] Compile [x64] VoiceChatActor.gen.cpp
+[47/66] Compile [x64] Weapon.gen.cpp
+[48/66] Compile [x64] MainMenuWidget.cpp
+[49/66] Compile [x64] GameMenuWidget.cpp
+[50/66] Compile [x64] AIPlayerController.cpp
+[51/66] Compile [x64] InGameHUD.cpp
+[52/66] Compile [x64] PlasmaPistolActor.cpp
+[53/66] Compile [x64] VRPlayerController.gen.cpp
+[54/66] Compile [x64] Weapon.cpp
+[55/66] Compile [x64] ProjectilePlasmaBolt.cpp
+[56/66] Compile [x64] PlayerCharacter.gen.cpp
+[57/66] Compile [x64] VoiceChatActor.cpp
+[58/66] Compile [x64] SettingsMenuWidget.gen.cpp
+[59/66] Compile [x64] TVScreenActor.cpp
+[60/66] Compile [x64] ReadyPlayerFourGameMode.gen.cpp
+[61/66] Compile [x64] SettingsMenuWidget.cpp
+[62/66] Compile [x64] ReadyPlayerFourGameMode.cpp
+[63/66] Compile [x64] PlayerCharacter.cpp
+[64/66] Compile [x64] VRPlayerController.cpp
+[65/66] Link [x64] ReadyPlayerFour.exe
+[66/66] WriteMetadata ReadyPlayerFour.target (UBA disabled)
+Trace file written to C:/Users/nkuhn/AppData/Local/UnrealBuildTool/Log.uba with size 15.7kb
+Total time in Unreal Build Accelerator local executor: 27.69 seconds
+Total execution time: 29.47 seconds

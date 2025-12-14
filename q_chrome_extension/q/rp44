@@ -1,0 +1,12 @@
+#!/bin/bash
+
+echo "REDIRECT DEEPER"
+
+# Check if the directory exists before changing into it
+if [ -d "/home/nick/sites/waypoints/nexus/scripts/ReadyPlayerFour/Assets/Scripts" ]; then
+  cd /home/nick/sites/waypoints/nexus/scripts/ReadyPlayerFour/Assets/Scripts
+  echo "Successfully changed directory."
+else
+  echo "Directory does not exist: /home/nick/sites/waypoints/nexus/scripts/ReadyPlayerFour/Assets/Scripts"
+  exit 1
+fi

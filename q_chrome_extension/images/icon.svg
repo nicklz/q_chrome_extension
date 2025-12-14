@@ -1,0 +1,85 @@
+
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <defs>
+    <!-- Dark backdrop -->
+    <radialGradient id="bgGrad" cx="50%" cy="50%" r="70%">
+      <stop offset="0%" stop-color="#0d141b"/>
+      <stop offset="100%" stop-color="#0b1218"/>
+    </radialGradient>
+
+    <!-- Red neon gradient -->
+    <linearGradient id="redNeon" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ff6b7d"/>
+      <stop offset="50%" stop-color="#ff2d3f"/>
+      <stop offset="100%" stop-color="#ff6b7d"/>
+    </linearGradient>
+
+    <!-- Subtle lighter ring gradient -->
+    <linearGradient id="lightRing" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#ffd6db" stop-opacity="0.9"/>
+      <stop offset="50%" stop-color="#ff9aa6" stop-opacity="0.8"/>
+      <stop offset="100%" stop-color="#ffd6db" stop-opacity="0.9"/>
+    </linearGradient>
+
+    <!-- Outer/inner glow -->
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="3" result="blur1"/>
+      <feGaussianBlur stdDeviation="6" in="SourceGraphic" result="blur2"/>
+      <feMerge>
+        <feMergeNode in="blur2"/>
+        <feMergeNode in="blur1"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="256" height="256" fill="url(#bgGrad)"/>
+
+  <!-- Parameters used (center 128,128). Arc leaves a gap on the right for the restart arrow. -->
+  <!-- Outer main arc -->
+  <path d="M 196.94 70.15
+           A 92 92 0 1 1 196.94 185.85"
+        fill="none"
+        stroke="url(#redNeon)"
+        stroke-width="16"
+        stroke-linecap="round"
+        filter="url(#glow)"/>
+
+  <!-- Inner main arc (double line) -->
+  <path d="M 194.07 73.34
+           A 76 76 0 1 1 194.07 182.66"
+        fill="none"
+        stroke="url(#redNeon)"
+        stroke-width="10"
+        stroke-linecap="round"
+        filter="url(#glow)"/>
+
+  <!-- Extra thin highlight rings (subtle inner/outer borders) -->
+  <path d="M 198.30 68.90
+           A 98 98 0 1 1 198.30 187.10"
+        fill="none"
+        stroke="url(#lightRing)"
+        stroke-width="2"
+        stroke-linecap="round"
+        opacity="0.75"
+        filter="url(#glow)"/>
+  <path d="M 192.80 74.61
+           A 70 70 0 1 1 192.80 181.39"
+        fill="none"
+        stroke="url(#lightRing)"
+        stroke-width="2"
+        stroke-linecap="round"
+        opacity="0.7"
+        filter="url(#glow)"/>
+
+  <!-- Restart arrowhead (triangular) with slight motion tails to suggest loop -->
+  <g filter="url(#glow)">
+    <!-- motion trails -->
+    <polygon points="208,128 200,121 200,135" fill="#ff8a96" opacity="0.55"/>
+    <polygon points="214,128 204,119 204,137" fill="#ff4b5d" opacity="0.75"/>
+    <!-- main arrow -->
+    <polygon points="224,128 202,114 202,142" fill="url(#redNeon)"/>
+  </g>
+</svg>

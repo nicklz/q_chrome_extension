@@ -1,0 +1,91 @@
+#!/bin/bash
+
+# Path to the JSON file
+json_file=~/.nexus/config
+
+# Check if the file exists
+if [ ! -f "$json_file" ]; then
+  echo "File $json_file not found."
+  exit 1
+fi
+
+# Read the JSON file and extract values
+config=$(jq -r '.config' "$json_file")
+
+# Check if the 'config' object is empty or not an object
+if [ -z "$config" ] || [ "$config" == "null" ] || [ "$(jq 'type == "object"' <<< "$config")" != "true" ]; then
+  echo "Config object not found or is not a valid object in $json_file."
+  cat ~/.nexus/config
+  echo "{\"config\": {\"status\":1}, \"history\": []}" >  ~/.nexus/config
+  echo "RESET CONFIG FILE - PLEASE TRY AGAIN"
+  exit 1
+fi
+
+# Get the history array from the config
+history=()
+state=()
+quality=()
+
+# Take the first argument and push it into the history array
+prompt=$1
+test=$2
+precision=${3:-10}  # Set precision to 10 if $3 is not provided
+
+for ((i=1; i<=precision; i++)); do
+  # Call the function 'a' in the background and store the process ID
+  a "$prompt" | sed 's/Answer://gi' | while read -r answer; do
+    state+=("$answer")
+    history+=("$answer")
+  done &
+  pids+=($!)  # Store the process ID
+done
+
+# Wait for all background processes to finish
+wait "${pids[@]}"
+
+for i in "${state[@]}"; do
+  # Call the function 'a' in the background and store the process ID
+  a "On a scale of 1-9, 9 being best does the string '$i' match '$test'" | sed 's/Answer://gi' | while read -r answer; do
+    quality+=("$answer")
+    history+=("$test $i $answer $quality")
+  done &
+  pids+=($!)  # Store the process ID
+done
+
+# Wait for all background processes to finish
+wait "${pids[@]}"
+
+# Initialize variables to store the highest rating and corresponding answer
+highest_rating=0
+highest_index=-1
+
+for ((i=0; i<${#quality[@]}; i++)); do
+  # Extract numerical ratings
+  rating=$(echo "${quality[i]}" | sed 's/[^0-9]*//g' | tr -d '\r\n')
+
+  # Convert rating to integer, checking if it's empty first
+  if [ -n "$rating" ]; then
+    rating=$(echo "$rating" | awk '{print int($1)}')
+
+    # If the rating is higher than the current highest rating, update the highest rating and index
+    if [ "$rating" -gt "$highest_rating" ]; then
+      highest_rating=$rating
+      highest_index=$i
+    fi
+    
+  fi
+done
+
+# Output the highest rated answer
+if [ "$highest_index" -ne -1 ]; then
+  echo "${state[highest_index]}"
+  # Update the config object with the new history and state arrays
+  updated_config=$(jq --argjson history "$(printf '%s\n' "${history[@]}" | jq -R . | jq -s .)" \
+                     --argjson state "$(printf '%s\n' "${state[@]}" | jq -R . | jq -s .)" \
+                     '. + {history: $history, state: $state}' "$json_file")
+  echo "$updated_config" > "$json_file" 
+
+fi
+
+#echo "history updated successfully."
+# cat ~/.nexus/config

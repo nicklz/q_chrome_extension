@@ -1,0 +1,34 @@
+#!/bin/bash
+echo "EXAMPLE: s 'while true; do ./infra_update_kubeconfig.sh; sleep 10; done' && make up"
+# Check if required arguments are provided
+if [ $# -ne 1 ]; then
+  echo "Usage: $0 <command-to-run-in-a-screen>"
+  exit 1
+fi
+
+# Command to run
+COMMAND="$1"
+
+# Display command in large letters using figlet, if installed
+if command -v figlet > /dev/null 2>&1; then
+    echo "MINI SESSION ACTIVATED" | figlet | lolcat
+    echo "COMMAND: $COMMAND" | figlet | lolcat
+else
+    echo "Figlet is not installed. Proceeding without it."
+fi
+
+
+
+# Create a detached screen session that runs the command and then exits to shell
+screen -X -S session quit
+screen -S session -d -m bash -c "$COMMAND; exec bash"
+
+# Optional: Reattach to the screen session
+screen -r session
+
+# To exit the script after reattaching (and let the session continue in foreground):
+# exit 0
+
+# If you wanted to automatically terminate the session after detaching again,
+# you would use the following command, but usually, you leave the session running:
+# screen -X -S session quit

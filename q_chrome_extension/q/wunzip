@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+
+echo "CUSTOM WINRAR UNZIP" | figlet | lolcat
+
+# Check if the provided argument is a .rar file
+if [[ "$1" =~ \.rar$ ]]; then
+    # Check if the file exists
+    if [ -f "$1" ]; then
+        # Remove the ".rar" extension from the file name
+        file_name_without_extension="${1%.rar}"
+        # Check if the file without the extension exists
+        if [ -f "$file_name_without_extension" ]; then
+            # Remove the file without the extension
+            rm "$file_name_without_extension"
+        fi
+        # Extract the contents of the .rar file
+        /mnt/c/Program\ Files/WinRAR/WinRAR.exe x "$1"
+    else
+        echo "Error: File $1 not found."
+        exit 1
+    fi
+else
+    echo "Error: $1 is not a .rar file."
+    exit 1
+fi

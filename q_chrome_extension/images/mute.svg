@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" style="background: rgb(10,16,22);">
+  <defs>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="2.8" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+<polyline points="84,96 116,96 144,72 144,184 116,160 84,160" stroke="rgba(58,180,255,1.0)" stroke-width="10" fill="none" filter="url(#glow)"/>
+<polyline points="84,96 116,96 144,72 144,184 116,160 84,160" stroke="rgba(58,180,255,0.55)" stroke-width="7" fill="none" filter="url(#glow)"/>
+<polyline points="84,96 116,96 144,72 144,184 116,160 84,160" stroke="rgba(58,180,255,0.35)" stroke-width="5" fill="none" filter="url(#glow)"/>
+<polyline points="84,96 116,96 144,72 144,184 116,160 84,160" stroke="rgba(58,180,255,0.22)" stroke-width="3" fill="none" filter="url(#glow)"/><path d="M 154 116 A 22 22 0 0 1 154 140" stroke="rgba(58,180,255,0.6)" stroke-width="6" fill="none" filter="url(#glow)"/><path d="M 154 116 A 36 36 0 0 1 154 140" stroke="rgba(58,180,255,0.6)" stroke-width="6" fill="none" filter="url(#glow)"/><line x1="72" y1="72" x2="184" y2="184" stroke="rgba(255,42,109,1.0)" stroke-width="14" stroke-linecap="round" fill="none" filter="url(#glow)"/>
+<line x1="72" y1="72" x2="184" y2="184" stroke="rgba(255,42,109,0.55)" stroke-width="11" stroke-linecap="round" fill="none" filter="url(#glow)"/>
+<line x1="72" y1="72" x2="184" y2="184" stroke="rgba(255,42,109,0.35)" stroke-width="9" stroke-linecap="round" fill="none" filter="url(#glow)"/>
+<line x1="72" y1="72" x2="184" y2="184" stroke="rgba(255,42,109,0.22)" stroke-width="7" stroke-linecap="round" fill="none" filter="url(#glow)"/></svg>

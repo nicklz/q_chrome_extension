@@ -1,0 +1,18 @@
+#!/bin/bash
+
+echo "🪓🪓🪓🪓🪓🪓🪓🪓🪓🪓🪓🪓🪓🪓🪓🪓🪓🪓🪓🪓BEGIN LOGS 🪓🪓🪓🪓🪓🪓🪓🪓🪓🪓🪓🪓🪓🪓🪓🪓🪓🪓🪓🪓🪓🪓🪓🪓🪓🪓🪓🪓"
+
+sudo journalctl -g 'NEXUS' -f | while read -r line; do
+    first_part=$(echo "$line" | php -r '$line = fgets(STDIN); $first_part = substr($line, 0, 150); echo $first_part;')
+    rest=$(echo "$line" | php -r '$line = fgets(STDIN); $rest = substr($line, 150); echo $rest;')
+    echo "$first_part" | lolcat
+    echo "$rest" | sed 's/\\n/\n/g'
+done &
+
+tail -f /var/www/logs/websocket_server.log | while read -r line; do
+    first_part=$(echo "$line" | php -r '$line = fgets(STDIN); $first_part = substr($line, 0, 150); echo $first_part;')
+    rest=$(echo "$line" | php -r '$line = fgets(STDIN); $rest = substr($line, 150); echo $rest;')
+    echo "$first_part" | lolcat
+    echo "$rest" | sed 's/\\n/\n/g'
+done
+

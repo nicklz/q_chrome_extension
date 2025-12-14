@@ -1,0 +1,1 @@
+console.log('legacy content.js loaded')

@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <defs>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="2.5" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <g filter="url(#glow)">
+  
+      <path d="M96,80 L176,128 L96,176 Z" fill="none" stroke="#00C76F" stroke-width="16" stroke-linecap="round" stroke-linejoin="round" />
+      <path d="M96,80 L176,128 L96,176 Z" fill="none" stroke="#00FF7F" stroke-width="10" stroke-linecap="round" stroke-linejoin="round" />
+    
+
+      <path d="M188,104 v48" fill="none" stroke="#00C76F" stroke-width="12" stroke-linecap="round" stroke-linejoin="round" />
+      <path d="M188,104 v48" fill="none" stroke="#00FF7F" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" />
+    
+
+      <path d="M208,96 v64" fill="none" stroke="#00C76F" stroke-width="12" stroke-linecap="round" stroke-linejoin="round" />
+      <path d="M208,96 v64" fill="none" stroke="#00FF7F" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" />
+    
+
+      <path d="M228,104 v48" fill="none" stroke="#00C76F" stroke-width="12" stroke-linecap="round" stroke-linejoin="round" />
+      <path d="M228,104 v48" fill="none" stroke="#00FF7F" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" />
+    
+  </g>
+</svg>

@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+
+# 🟢 AUTO FORMAT SCRIPT – Business/Creative Projects Formatter with VENV Resilience
+
+ENV_FILE="$(dirname "$0")/../.env"
+if [ -f "$ENV_FILE" ]; then
+    export $(grep -v '^#' "$ENV_FILE" | xargs)
+fi
+
+if [ -z "$INSTALL_PATH" ]; then
+    echo "🔴 Error: INSTALL_PATH is not set in .env"
+    exit 1
+fi
+
+PYTHON_SCRIPT="$INSTALL_PATH/q/format_files.py"
+TARGET_DIR="${1:-.}"
+VENV_DIR="$INSTALL_PATH/venv"
+
+echo -e "🟢 [START] Auto-formatting process for directory: $TARGET_DIR\n"
+
+# 🟡 Step 1: Ensure virtual environment exists and is valid
+if [ ! -f "$VENV_DIR/bin/activate" ]; then
+    echo -e "🟡 [VENV] venv invalid or missing. Recreating at $VENV_DIR"
+    rm -rf "$VENV_DIR"
+    python3 -m venv "$VENV_DIR"
+    if [ ! -f "$VENV_DIR/bin/activate" ]; then
+        echo "🔴 Failed to create virtual environment (activate script still missing)"
+        exit 1
+    fi
+fi
+
+
+# 🟡 Step 2: Activate the virtual environment
+VENV_ACTIVATE="$VENV_DIR/bin/activate"
+if [ ! -f "$VENV_ACTIVATE" ]; then
+    echo "🔴 Virtual environment activation script not found at $VENV_ACTIVATE"
+    exit 1
+fi
+
+source "$VENV_ACTIVATE"
+if [ $? -ne 0 ]; then
+    echo "🔴 Failed to activate Python venv at $VENV_DIR"
+    exit 1
+fi
+echo -e "🟢 [VENV] Activated virtual environment."
+
+# 🟡 Step 3: Ensure required packages are installed
+REQUIRED_PKGS=(openai python-dotenv)
+for pkg in "${REQUIRED_PKGS[@]}"; do
+    pip show "$pkg" &>/dev/null
+    if [ $? -ne 0 ]; then
+        echo -e "🟡 [VENV] Installing missing package: $pkg"
+        pip install --upgrade pip
+        pip install "$pkg"
+    fi
+done
+
+# 🟡 Step 4: Process all .txt files in directory
+find "$TARGET_DIR" -maxdepth 1 -type f -name '*.txt' -print0 | while IFS= read -r -d '' file; do
+    echo -e "🟡 [THREAD START] Processing: $file"
+    python "$PYTHON_SCRIPT" "$file"
+    echo -e "🟢 [THREAD COMPLETE] $file\n"
+done
+
+# 🟢 Step 5: Deactivate venv and exit cleanly
+deactivate
+echo -e "🟢🟢🟢 [ALL COMPLETED] All .txt files have been normalized and structured."

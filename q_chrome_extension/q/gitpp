@@ -1,0 +1,53 @@
+#!/bin/bash
+
+
+echo "gitpp: START GIT PULL" | lolcat
+git pull origin master 
+
+echo "gitpp: cd /home/nexus/sites/waypoints/nexus/app/client && npm run build &" | lolcat
+cd /home/nexus/sites/waypoints/nexus/app/client && nohup npm run build >/dev/null 2>&1 &
+
+echo "gitpp: CHOWN" | lolcat
+cd ~/sites/waypoints && sudo chown -R www-data:www-data ./* 
+cd /home/nexus/sites/waypoints/nexus/template11/app  && npm run build &
+cd /home/nexus/sites/waypoints/nexus/template13/app  && npm run build &
+cd ~/sites/waypoints
+
+echo "PASSWORD ACCEPTED PULLING GIT REPO" | lolcat
+echo "WAIT!!!!!!!" | lolcat
+
+echo "GIT PULL" | lolcat
+
+echo "SILENT KILL" | lolcat
+sudo kill -9 $(sudo lsof -t -i:3000 2>/dev/null) 2>/dev/null &
+sudo kill -9 $(sudo lsof -t -i:42069 2>/dev/null) 2>/dev/null &
+sudo kill -9 $(sudo lsof -t -i:8080 2>/dev/null) 2>/dev/null &
+sudo kill -9 $(sudo lsof -t -i:8085 2>/dev/null) 2>/dev/null &
+
+
+
+
+echo "RELOAD EVERYTHING" | lolcat
+sudo systemctl daemon-reload &
+sudo systemctl restart websocket-server &
+sudo systemctl enable websocket-server &
+sudo service php8.3-fpm restart &
+
+sudo service nginx restart &
+
+
+sudo systemctl stop websocket-server &
+
+sudo redis-cli FLUSHALL &
+sudo rabbitmqctl list_queues -q name | while read queue; do sudo rabbitmqctl purge_queue "$queue"; done &
+sudo systemctl restart websocket-server &
+sudo systemctl restart websocket-server.service &
+
+
+wait
+echo "READY!" | lolcat
+echo "📝📝📝 🪓🪓🪓 FOR LOGGING:" | lolcat
+echo " tail -f /var/log/nginx/error.log" | lolcat
+echo "sudo journalctl -g 'NEXUS' -f" | lolcat
+
+cd /home/nexus/sites/waypoints/nexus/app/ && yarn dev

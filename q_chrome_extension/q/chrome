@@ -1,0 +1,4 @@
+#/bin/bash
+
+echo 'chrome.exe" "https://chatgpt.com/?nexus=1' | lolcat
+powershell.exe Start-Process "chrome.exe" "https://chatgpt.com/?nexus=1"

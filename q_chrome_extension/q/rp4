@@ -1,0 +1,5 @@
+#!/bin/bash
+
+
+echo "REDIRECT BASIC"
+cd /home/nick/sites/waypoints/nexus/scripts/ReadyPlayerFour

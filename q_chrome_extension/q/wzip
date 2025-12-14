@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+
+echo "CUSTOM WINRAR" | figlet | lolcat
+
+# Function to add .rar extension to the input string
+add_extension() {
+    echo "$1.rar"
+}
+
+# Check if there are any parameters passed
+if [ $# -eq 0 ]; then
+    echo "No parameters passed. Exiting..."
+    exit 1
+fi
+
+# Generate the output file name based on the first parameter passed
+output_file=$(add_extension "$1")
+
+# Check if the input file exists
+if [ ! -f "$1" ]; then
+    echo "Input file does not exist. Exiting..."
+    exit 1
+fi
+
+# Compress the input file using WinRAR with maximum compression level
+
+#"/mnt/c/Program Files/WinRAR/WinRAR.exe" a  "$output_file" "$1"
+"/mnt/c/Program Files/WinRAR/WinRAR.exe" a -m5   "$output_file" "$1"
+
+# Check if compression was successful
+if [ $? -eq 0 ]; then
+    echo "Compression successful!"
+else
+    echo "Compression failed. Exiting..."
+    exit 1
+fi
+

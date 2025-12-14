@@ -1,0 +1,4 @@
+#/bin/bash
+
+
+phpcs --standard=Drupal --colors --extensions=php,module,inc,install,test,profile,theme,css,info,txt,md --ignore=*node_modules/*,*bower_components/*,*vendor/*,*.min.js,*.min.css .

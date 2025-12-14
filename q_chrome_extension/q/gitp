@@ -1,0 +1,6 @@
+#!/bin/bash
+# [Q] Git Pull Current Branch Safely
+# no critical data is lost
+
+CURRENT_BRANCH="$(git rev-parse --abbrev-ref HEAD)" || exit 1
+git pull origin "$CURRENT_BRANCH"

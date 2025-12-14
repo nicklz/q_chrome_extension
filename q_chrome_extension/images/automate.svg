@@ -1,0 +1,51 @@
+<!-- Minimal Neon Robotic Helmet (Symmetrical, Simple) -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" aria-hidden="true">
+  <defs>
+    <style>
+      :root{
+        --cyan:#22d3ee;
+        --cyan2:#9ef6ff;
+        --magenta:#ff3ea5;
+        --glowC:#29e3fe;
+        --glowM:#ff5ac8;
+        --w:12;
+        --round:round;
+      }
+      .s{fill:none;stroke-linecap:var(--round);stroke-linejoin:var(--round);}
+      .c1{stroke:var(--cyan);stroke-width:var(--w);}
+      .c2{stroke:var(--cyan2);stroke-width:calc(var(--w)*0.55);}
+      .m1{stroke:var(--magenta);stroke-width:calc(var(--w)*0.9);}
+    </style>
+
+    <filter id="gC" x="-50%" y="-50%" width="200%" height="200%">
+      <feDropShadow dx="0" dy="0" stdDeviation="10" flood-color="var(--glowC)" flood-opacity="0.9"/>
+    </filter>
+    <filter id="gM" x="-50%" y="-50%" width="200%" height="200%">
+      <feDropShadow dx="0" dy="0" stdDeviation="9" flood-color="var(--glowM)" flood-opacity="0.9"/>
+    </filter>
+  </defs>
+
+  <!-- DOME (single arc + thin inner echo) -->
+  <g filter="url(#gC)">
+    <path class="s c1" d="M88 228a168 168 0 0 1 336 0"/>
+    <path class="s c2" d="M104 228a152 152 0 0 1 304 0"/>
+  </g>
+
+  <!-- VISOR (rounded rect + inner echo) -->
+  <g filter="url(#gM)">
+    <rect class="s m1" x="120" y="244" width="272" height="54" rx="24"/>
+    <rect class="s m1" x="138" y="257" width="236" height="28" rx="14" stroke-opacity="0.6"/>
+  </g>
+
+  <!-- EARS (tiny blocks, mirrored) -->
+  <g filter="url(#gC)">
+    <rect class="s c1" x="96"  y="248" width="28" height="46" rx="8"/>
+    <rect class="s c1" x="388" y="248" width="28" height="46" rx="8"/>
+  </g>
+
+  <!-- CHIN + NECK (minimal) -->
+  <g filter="url(#gC)">
+    <path class="s c1" d="M184 332h144"/>
+    <line class="s c2" x1="224" y1="380" x2="288" y2="380"/>
+  </g>
+</svg>

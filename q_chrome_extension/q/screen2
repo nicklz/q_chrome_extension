@@ -1,0 +1,13 @@
+#!/bin/bash
+
+# Check if required arguments are provided
+if [ $# -ne 1 ]; then
+  echo "Usage: $0 <command-to-run-in-a-screen>"
+  exit 1
+fi
+
+# Set the name for your Docker image
+COMMAND="$1"
+
+echo "$COMMAND" | figlet
+screen -dmS kubeconfig bash -c $COMMAND && screen -r

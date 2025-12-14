@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+
+BRANCH="$(git symbolic-ref --short HEAD)" || exit 1
+TS="$(date +%s)"
+
+git add .
+git commit -m "[Q] Deployment ${TS} 🚀✅"
+git push origin "$BRANCH"

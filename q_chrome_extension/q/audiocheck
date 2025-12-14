@@ -1,0 +1,4 @@
+#!/bin/bash
+
+
+sox /home/nexus/sites/waypoints/nexus/scripts/skynet/data/output_readAloudAudio.wav -t f32 - | grep -q -v '^0\.0$' && echo "Non-zero samples detected." || echo "No non-zero samples found."

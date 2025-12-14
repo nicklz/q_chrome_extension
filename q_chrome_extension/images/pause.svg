@@ -1,0 +1,31 @@
+
+<!-- Pause icon with inverse lighting: background glow appears behind the bars -->
+<svg width="220" height="220" viewBox="0 0 220 220" xmlns="http://www.w3.org/2000/svg">
+  <!-- dark base -->
+  <rect width="220" height="220" fill="#0d1418"></rect>
+
+  <!-- outer glow layer (appears behind main bars) -->
+  <g filter="url(#glow)">
+    <rect x="56" y="40" width="32" height="140" rx="16" ry="16" fill="#ffd54a" opacity="0.25"></rect>
+    <rect x="132" y="40" width="32" height="140" rx="16" ry="16" fill="#ffd54a" opacity="0.25"></rect>
+  </g>
+
+  <!-- secondary offset loop -->
+  <g transform="translate(4,4)" stroke="#e6b800" fill="none" stroke-width="12" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="56" y="40" width="32" height="140" rx="16" ry="16"></rect>
+    <rect x="132" y="40" width="32" height="140" rx="16" ry="16"></rect>
+  </g>
+
+  <!-- main bright bars -->
+  <g stroke="#ffef9f" fill="none" stroke-width="10" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="56" y="40" width="32" height="140" rx="16" ry="16"></rect>
+    <rect x="132" y="40" width="32" height="140" rx="16" ry="16"></rect>
+  </g>
+
+  <!-- glow definition -->
+  <defs>
+    <filter id="glow" x="0" y="0" width="220" height="220">
+      <feGaussianBlur stdDeviation="8" result="blur"></feGaussianBlur>
+    </filter>
+  </defs>
+</svg>

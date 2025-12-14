@@ -1,0 +1,20 @@
+#!/bin/bash
+
+# Stop all running containers
+sudo docker stop $(sudo docker ps -aq)
+
+# Remove all containers (including stopped ones)
+sudo docker rm $(sudo docker ps -aq)
+
+# Remove all images (both dangling and untagged)
+sudo docker rmi $(sudo docker images -q)
+
+# Remove all unused volumes
+sudo docker volume prune -f
+
+# Remove all unused networks
+sudo docker network prune -f
+
+# Remove all unused Docker objects (containers, networks, volumes, and images)
+sudo docker system prune -a -f --volumes
+

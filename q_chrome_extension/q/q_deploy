@@ -1,0 +1,68 @@
+# #!/bin/bash
+# # ✅ Display banner
+# echo "✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅"
+# figlet "[Q] DEPLOYMENT INITIATED" | lolcat
+# echo "✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅"
+# # ✅ Check for ftp, install if missing
+# if ! command -v ftp &> /dev/null; then
+#   echo "🔧 Installing FTP client..." | lolcat
+#   sudo apt-get update && sudo apt-get install -y inetutils-ftp
+# fi
+
+# # ✅ Prompt for FTP password
+# echo -n "🔑 Enter FTP password for user 'nicklzco': "
+# read -s FTP_PASSWORD
+# echo ""
+
+# echo "🔵 Starting Q Deploy..." | lolcat
+
+# # ✅ Remove old q_chrome_extension folders from Desktop
+# echo "🟠 Cleaning ~/desktop/q_chrome_extension*"
+# rm -rf ~/desktop/q_chrome_extension*
+# echo "✅ Old folders removed."
+
+# # ✅ Copy project folder to Desktop
+# echo "🟠 Copying project to ~/desktop..."
+# cp -r ~/sites/waypoints/nexus/scripts/q_chrome_extension ~/desktop/
+# echo "✅ Copy complete."
+
+# # ✅ Clean data folder
+# echo "🟠 Clearing data/ folder..."
+# rm -rf ~/desktop/q_chrome_extension/data/*
+# echo "✅ data/ cleaned."
+
+# # ✅ Remove .env file
+# echo "🟠 Removing .env..."
+# rm -f ~/desktop/q_chrome_extension/.env
+# echo "✅ .env removed."
+
+
+# # ✅ Remove .git directory
+# echo "🟠 Removing .git..."
+# rm -rf ~/desktop/q_chrome_extension/.git
+# echo "✅ .git removed."
+
+# # ✅ Zip the cleaned folder
+# echo "🟠 Zipping folder..."
+# cd ~/desktop
+# zip -r q_chrome_extension.zip q_chrome_extension > /dev/null
+# echo "✅ Zip complete."
+
+# # ✅ Upload via FTP
+# echo "🟠 Uploading via FTP to nicklz.com:~/public_html/nexus/q_chrome_extension.zip..."
+
+# ftp -inv nicklz.com <<EOF
+# user nicklzco $FTP_PASSWORD
+# passive
+# cd public_html/nexus
+# put q_chrome_extension.zip
+# bye
+# EOF
+
+
+# echo "✅ Upload complete."
+
+# # ✅ Display banner
+# echo "✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅"
+# figlet "[Q] DEPLOYMENT COMPLETE" | lolcat
+# echo "✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅"

@@ -1,0 +1,16 @@
+#!/bin/bash
+
+# Read nexus_value from file
+nexus_value=$(cat /home/nick/sites/waypoints/nexus/q/q.log)
+
+# Check if the warning exists in the log and strip everything before it
+if [[ "$nexus_value" == *"Warning: Visual Studio 2022 compiler is not a preferred version"* ]]; then
+    nexus_value=$(echo "$nexus_value" | awk -v RS="Warning: Visual Studio 2022 compiler is not a preferred version" 'NR>1 {print "Warning: Visual Studio 2022 compiler is not a preferred version" $0}')
+fi
+
+# URL encode the value
+encoded_nexus_value=$(python3 -c "import urllib.parse, sys; print(urllib.parse.quote(sys.argv[1]))" \
+    "THE FOLLOWING ARE BUILD LOGS INCLUDING ERRORS: $nexus_value BASED OFF THOSE LOGS FIND ANY ERRORS. on RUN 01 use the command lsd <path> but convert the windows path C:\Users\nkuhn\Documents\Unreal Projects\waypoints\nexus\scripts\ReadyPlayerFour\Source\ReadyPlayerFourModule\ to /home/nick/sites/waypoints/nexus/scripts/ReadyPlayerFour/Source/ReadyPlayerFourModule first. so for example lsd /home/nick/sites/waypoints/nexus/scripts/ReadyPlayerFour/Source/ReadyPlayerFourModule/Characters     if the error comes from that directory. take the erroring file and do whatever directory its in. this this 'command' as the first  RUN 01 and then use /home/nick/sites/waypoints/nexus/scripts/q_chrome_extension/tools/edit_file_with_prompt.py fullfilepath goes here as first arg, then second is the prompt with specific functions to change based on your reading from RUN 01. run this only in RUN 02+. YOU HAVE TO WAIT FOR RUN 01 to FINISH AND GET OUTPUT BACK BEFORE RUNNIGN 02. DO NOT PUT THE SAME RUN NUMBER IN A SINGLE array of FAAS. RUN 01 goes first, you lsd in it to read files, then you run python to edit with your findings. remember when doing the python edit prompts to make sure those strings are bash friendly and for you to add quotes around that arguemt when you write it out. ALSO WHEN YOU GENERATE THE PROMPT TO FIX THE FILE, INCLUDE THE ORIGINAL ERROR AS IS + YOUR FIX IDEAS. PUT ALL ERRORS FOUND IN THE LOGS INTO THE PROMPT YOU CREATE STRIP OUT ANY QUOTES OR SPECCIAL CHARACTERS AND TRY AND GUESS WHICH FUNCTION TO FIX. KEEP THE ERRORS FULLY THEN ADD IN YORU FIX TIPS.")
+
+# Launch Chrome with the safe fragment identifier
+powershell.exe -Command "Start-Process 'chrome.exe' 'https://chatgpt.com/?model=o3-mini-high#nexus=$encoded_nexus_value'"
