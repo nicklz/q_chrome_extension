@@ -10,13 +10,13 @@ The **Q Chrome Extension** is a local-first automation framework that bridges br
 
 ## 🔧 Key Features
 
-- ✅ Fully local sandbox: All operations run on your machine  
-- ✅ JSON-only command language via FAAS (Functions and Arrays System)  
-- ✅ No blind file writes — all changes are preceded by read operations  
-- ✅ Intelligent mutation using `edit_file_with_prompt.py`  
-- ✅ Chrome extension integration for optional UI automation  
-- ✅ Git diff validation for every file change  
-- ✅ Compatible with macOS, Linux, WSL2  
+* **Fully local sandbox** — every command, edit, and process executes on your machine with no remote side effects
+* **Strict JSON command interface (FAAS / QID)** — all automation is defined through a structured, auditable Functions and Arrays System
+* **Read-before-write enforcement** — files are always inspected before modification; blind writes are disallowed by design
+* **Prompt-driven intelligent mutation** — controlled code edits performed via QID system
+* **Optional Chrome extension layer** — enables browser-based UI automation without requiring it for core operation
+* **Mandatory Git diff validation** — every file mutation must be verified and reviewed through diffs
+* **Cross-platform compatibility** — runs on macOS, Linux, and WSL2 without platform-specific rewrites
 
 ---
 
@@ -24,8 +24,6 @@ The **Q Chrome Extension** is a local-first automation framework that bridges br
 
 ### 1. Prerequisites
 
-- [ ] OpenAI API Key  
-  Get one from https://platform.openai.com/account/api-keys  
 - [ ] Bash shell or compatible terminal  
 - [ ] macOS or Linux system (WSL2 also supported)  
 - [ ] Basic knowledge of CLI and file paths  
@@ -40,14 +38,13 @@ make install
 
 You’ll be prompted for:
 
-- OpenAI API Key  
 - Project path token (defaults to current working directory)  
 
 The installer performs:
 
 - Deletes any existing `.env`  
 - Copies `.env_EXAMPLE` → `.env`  
-- Writes API key, install path, user data into `.env`  
+- Writes API install path, user data into `.env`  
 - Copies and updates `Q_MEMORY_INTERNAL_EXAMPLE.json` → `Q_MEMORY_INTERNAL.json`  
 - Installs system packages via `brew` (macOS) or `apt` (Linux)  
 - Installs Python and Node dependencies  
