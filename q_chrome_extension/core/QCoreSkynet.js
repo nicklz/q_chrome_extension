@@ -39,6 +39,7 @@ window.HEARTBEAT        = 2000;
 })();
 
 
+
 // Build menu (kept async SVG fetch)
 (async function buildMenu() {
     // ---- Menu: now delegates into QCore* plugins ---- 

@@ -44,6 +44,7 @@
     'reddit.com',
     'distrokid.com',
     'virginwifi.com',
+    'runitbyq.com'
   ];
 
   const isAllowed = allowedDomains.some(

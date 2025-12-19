@@ -21,9 +21,11 @@ const MATCH_HOSTS = [
   "openai.com",
   "instagram.com",
   "reddit.com",
+  'distrokid.com',
   "facebook.com",
   "blockchain.com",
-  "virginwifi.com"
+  "virginwifi.com",
+  'runitbyq.com'
 ];
 function urlMatches(u = "") {
   try {

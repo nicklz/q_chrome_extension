@@ -27,6 +27,55 @@
     return null;
   };
 
+  // === QUEUE INTEGRATION (inline, no external helpers) ===
+  // Purpose:
+  //   Persist an updated ticket back into state.tickets,
+  //   overwriting the existing entry atomically.
+  //
+  // Contract:
+  //   - Accepts current state object `s`
+  //   - Accepts a full `ticket` object (must include a stable key: title or id)
+  //   - Mutates state via setState with a safe shallow copy
+  //   - Guarantees tickets object integrity
+  //   - No critical data is lost
+
+  const setActiveTicket = (s, ticket) => {
+    if (!s || !ticket || typeof ticket !== 'object') return;
+
+    // Determine ticket key (prefer title, fallback to id)
+    const key =
+      typeof ticket.title === 'string' && ticket.title.trim() !== ''
+        ? ticket.title
+        : typeof ticket.id === 'string' && ticket.id.trim() !== ''
+        ? ticket.id
+        : null;
+
+    if (!key) return;
+
+    const nextState = {
+      ...s,
+      tickets: {
+        ...(s.tickets || {}),
+        [key]: {
+          ...(s.tickets && s.tickets[key] ? s.tickets[key] : {}),
+          ...ticket,
+        },
+      },
+      title: key, // keep state.title in sync with active ticket
+    };
+
+    nextState.lockedOverride = true;
+    nextState.locked = false;
+
+    window?.QCoreContent?.setState(nextState);
+    console.log(' 🦖 🦖 🦖 🦖 🦖 🦖 🦖 🦖 [Q][setActiveTicket] window?.?.setState success lockedOverride',[nextState,s]);
+
+    nextState.lockedOverride = false;
+    window?.QCoreContent?.setState(nextState);
+    console.log(' 🦖 🦖 🦖 🦖 🦖 🦖 🦖 🦖 [Q][setActiveTicket] window?.?.setState success',[nextState,s]);
+  };
+
+
   // -------------------- Image branch handler --------------------
   async function sendImage(state) {
     try {
@@ -687,6 +736,28 @@
     state.qPrompt = params.has('Q_MANIFEST')
       ? params.get('Q_MANIFEST')
       : (params.has('Q_WRITE') ? params.get('Q_WRITE') : null);
+
+    // Read Q_MANIFEST only (Q_WRITE ignored here by design)
+    const qManifest = params.has('Q_MANIFEST') ? params.get('Q_MANIFEST') : null;
+
+    // if and only if Q_MANIFEST is set to a string with a length, setActiveTicket
+    if (typeof qManifest === 'string' && qManifest.length > 0) {
+      state.qPrompt = qManifest;
+
+      // load the active ticket, replace .description, save it as-is
+      const active = getActiveTicket(state);
+      if (active) {
+        setActiveTicket(state, {
+          ...active,
+          description: qManifest,
+          updatedAt: Date.now(),
+        });
+
+        state.locked = true;
+      }
+    }
+
+
 
     if (params.has('Q_MANIFEST')) {
       state.qPromptSingleFileWrite = 0;

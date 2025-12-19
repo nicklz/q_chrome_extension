@@ -1,252 +1,177 @@
 #!/usr/bin/env bash
 # =====================================================================================
-# lsd: List & Smart Dump — FILTER PASSED => ALWAYS RETURN/DUMP 0
+# lds: List & Detail Summary — gitignore/dockerignore-aware file listing
 # =====================================================================================
+# Behavior:
+# - Lists files using .gitignore (and standard git excludes) when inside a git repo.
+# - Also applies .dockerignore exclusions if present (best-effort, common patterns).
+# - Always hard-excludes obvious junk: node_modules, .git, dist/build caches, etc.
+# - Prints one line per file:
+#     ✅ <absolute_path> | <KB> KB | <created_or_mtime> | <perm>
 #
-# CHANGE (2025-11-08):
-# - If a Filter arg (2nd arg) is provided, this script will ALWAYS behave as:
-#     • Selected files count = 0
-#     • No file contents printed
-#     • Exit status = 0 (success)
-#   This overrides all previous filtering logic.
-#
-# DEFAULT (no Filter arg):
-# - Legacy behavior: dump all files within the given depth (or "all"/"a").
-#
-# USAGE
-#   lsd                         # shorthand list (depth=1), no dumping
-#   lsd <depth|all|a>           # dump all files
-#   lsd <depth|all|a> "<Filter>"# Filter provided -> print summary with Selected: 0 and exit 0
-#
+# Notes:
+# - "Created" time depends on filesystem support; if unavailable, falls back to mtime.
+# - Uses GNU coreutils 'stat' format when available; falls back to BSD stat variants.
 # =====================================================================================
-
-# ---- Settings kept for default path (no filter) ----
-CORE_FILTER=(error fail failed failure exception panic warn warning timeout retry auth token fatal critical crash todo fixme bug)
-ERROR_BONUS_WORDS=(error errors fail failed failure fatal exception panic crash critical warn warning timeout)
-ERROR_MULTIPLIER=5
-MAX_PRINT_BYTES=$((300 * 1024))
-PILL_MAX_TERMS=50
-TOP_TABLE_TERMS=10
-TOP_TABLE_MAIN=5
-BINARY_EXTS="zip|gz|bz2|xz|7z|png|jpg|jpeg|gif|webp|bmp|ico|mp3|wav|flac|mp4|m4v|mov|avi|mkv|pdf|exe|dll|dylib|so|wasm|bin|ttf|otf|woff|woff2"
 
 set -u
 
-# ---- Helpers ----
-LOG_TAG="[lsd]"
-START_TS_EPOCH=$(date +%s)
-log_info()  { printf "%s INFO: %s\n"  "$LOG_TAG" "$*" >&2; }
-log_warn()  { printf "%s WARN: %s\n"  "$LOG_TAG" "$*" >&2; }
-have_cmd()  { command -v "$1" >/dev/null 2>&1; }
+# --- Config: hard excludes (path fragments / top-level dirs) ---
+HARD_EXCLUDES_REGEX='(^|/)(node_modules|\.git|\.svn|\.hg|\.DS_Store|dist|build|coverage|\.next|\.cache)(/|$)'
 
-random_color() { printf "\033[38;5;$((RANDOM % 231 + 16))m"; }
-filesize() {
-  if have_cmd stat && stat -f%z "$1" >/dev/null 2>&1; then stat -f%z "$1" 2>/dev/null
-  elif have_cmd stat; then stat -c%s "$1" 2>/dev/null
-  else wc -c < "$1" 2>/dev/null | tr -d ' '
+# --- Helpers ---
+have_cmd() { command -v "$1" >/dev/null 2>&1; }
+
+abs_path() {
+  # Prefer realpath; fallback to python; fallback to prefix $PWD
+  if have_cmd realpath; then
+    realpath "$1" 2>/dev/null && return 0
   fi
-}
-humanize() {
-  local b=$1
-  [[ "$b" =~ ^[0-9]+$ ]] || { printf "%s" "$b"; return; }
-  awk -v s="$b" 'function H(x){sfx[0]="B";sfx[1]="KB";sfx[2]="MB";sfx[3]="GB";i=0;while(x>=1024&&i<3){x/=1024;i++}printf("%.2f %s",x,sfx[i])}BEGIN{H(s)}'
-}
-trim() { echo "$1" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'; }
-uniq_preserve() { awk '!seen[$0]++'; }
-is_binary_by_ext() { [[ "$1" =~ \.($BINARY_EXTS)$ ]]; }
-is_all_mode() {
-  local d="${1:-}"
-  [[ "$d" == "all" || "$d" == "a" ]] && return 0
-  [[ "$d" =~ ^[0-9]+$ ]] && return 1 || return 0
-}
-
-# ---- Word cloud (used only in default path) ----
-normalize_and_tokenize() {
-  tr '[:upper:]' '[:lower:]' \
-  | sed 's/[^[:alnum:]_[:space:]]\+/ /g' \
-  | tr -s '[:space:]' '\n' \
-  | sed '/^$/d'
-}
-make_ranked_words() {
-  normalize_and_tokenize \
-  | awk 'length($0)>1{print}' \
-  | awk '{f[$0]++} END{for(w in f) print w, f[w]}' \
-  | while read -r w c; do
-      bonus=1
-      for ew in '"$(printf '%s ' "${ERROR_BONUS_WORDS[@]}")"'; do
-        if [ "$w" = "$ew" ]; then bonus='"$ERROR_MULTIPLIER"'; break; fi
-      done
-      echo "$w $c $((c*bonus))"
-    done \
-  | sort -k3,3nr -k2,2nr -k1,1
-}
-render_wordcloud_json_like() {
-  local tmpfile="$1"
-  local total=0 n=0
-  while read -r _ _ s; do total=$((total+s)); n=$((n+1)); done < "$tmpfile"
-  local avg=$(( n>0 ? total/n : 1 )); [ $avg -le 0 ] && avg=1
-  echo "wordcloud_json:"
-  local i=0
-  while read -r w c s; do
-    i=$((i+1)); local size=$(( (s*100)/avg ))
-    echo "  - { \"word\": \"${w}\", \"count\": ${c}, \"score\": ${s}, \"rank\": ${i}, \"size\": ${size} }"
-  done < "$tmpfile"
-}
-render_pill_cloud() {
-  local limit="$1" ; shift
-  local i=0 out=""
-  while read -r w c s; do
-    i=$((i+1)); [ $i -gt "$limit" ] && break
-    local pills=$(( 1 + (s>9 ? 9 : s) ))
-    local bar="" ; for _ in $(seq 1 "$pills"); do bar="${bar}#"; done
-    out+="$bar ( ${w} · ${c} ) $bar\n"
-  done
-  if have_cmd lolcat; then printf "%b" "$out" | lolcat; else printf "%b" "$out"; fi
-}
-render_top_table() {
-  local n="$1"
-  printf "  %-4s %-24s %s\n" "Rank" "Word" "Count"
-  printf "  %-4s %-24s %s\n" "----" "------------------------" "-----"
-  local i=0
-  while read -r w c _; do
-    i=$((i+1)); [ $i -gt "$n" ] && break
-    printf "  %-4d %-24s %d\n" "$i" "$w" "$c"
-  done
-}
-summarize_file_wordcloud() {
-  local filepath="$1" ; local tmp="$(mktemp)"
-  if is_binary_by_ext "$filepath"; then echo "  (binary-like file; wordcloud skipped)"; return; fi
-  if ! make_ranked_words < "$filepath" > "$tmp"; then echo "  (failed to build wordcloud)"; rm -f "$tmp"; return; fi
-  echo "— WordCloud (scored; error words weighted x$ERROR_MULTIPLIER) —"
-  render_wordcloud_json_like "$tmp"
-  echo "pill_cloud:" ; render_pill_cloud "$PILL_MAX_TERMS" < "$tmp"
-  echo "top_5_table:" ; head -n "$TOP_TABLE_MAIN" "$tmp" | render_top_table "$TOP_TABLE_MAIN"
-  rm -f "$tmp"
-}
-
-print_file_colored() {
-  local filepath="$1"
-  local COLOR RESET
-  COLOR="$(random_color)"; RESET=$'\033[0m'
-  local t0 t1 dt size_b size_h
-  t0=$(date +%s%3N 2>/dev/null || date +%s)
-  size_b="$(filesize "$filepath")"
-  size_h="$(humanize "${size_b:-?}")"
-  echo -e "📁 FILEPATH ============================================================================================================== [ $filepath ]"
-  echo -e "📏 SIZE: ${size_b:-?} bytes (${size_h})"
-  if [ -n "${size_b:-}" ] && [ "$size_b" -gt "$MAX_PRINT_BYTES" ]; then
-    echo "⚠️  File > $MAX_PRINT_BYTES bytes; showing WordCloud summary only."
-    summarize_file_wordcloud "$filepath"
-  elif is_binary_by_ext "$filepath"; then
-    echo "⚠️  Binary-like file; content suppressed. WordCloud skipped."
-  else
-    echo -e "${COLOR}$(cat "$filepath")${RESET}"
+  if have_cmd python3; then
+    python3 - <<'PY' "$1" 2>/dev/null && return 0
+import os,sys
+print(os.path.realpath(sys.argv[1]))
+PY
   fi
-  t1=$(date +%s%3N 2>/dev/null || date +%s)
-  [[ "$t0" =~ ^[0-9]+$ && "$t1" =~ ^[0-9]+$ ]] && dt=$((t1 - t0)) && echo -e "⏱  DURATION: ${dt} ms"
-  echo -e "🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢"
+  printf "%s/%s\n" "$PWD" "${1#./}"
 }
 
-build_related_section() {
-  local -a keys=()
-  if [ "${#TOKENS[@]:-0}" -gt 0 ]; then keys=("${TOKENS[@]}"); else keys=("${CORE_FILTER[@]}"); fi
-  echo "════════════════════════════════════════════════════════════════════════════════════"
-  echo "RELATED FILES (by Filter/Core terms)"
-  echo "Terms: ${keys[*]}"
-  echo "════════════════════════════════════════════════════════════════════════════════════"
-  local related=()
-  while read -r f; do
-    [ -f "$f" ] || continue
-    for k in "${keys[@]}"; do
-      [ -z "$k" ] && continue
-      case "$f" in *"$k"*) related+=("$f"); break ;; esac
-    done
-  done
-  printf "%s\n" "${related[@]}" | uniq_preserve | while read -r f; do
-    echo "• $f"
-    if is_binary_by_ext "$f"; then echo "  (binary-like; skipping analysis)"; continue; fi
-    tmp="$(mktemp)"
-    if ! make_ranked_words < "$f" > "$tmp"; then echo "  (failed to analyze)"; rm -f "$tmp"; continue; fi
-    echo "  top_10:"; head -n "$TOP_TABLE_TERMS" "$tmp" | render_top_table "$TOP_TABLE_TERMS"
-    rm -f "$tmp"
-  done
-}
+stat_kb_perm_time() {
+  # Output: "<kb> <perm> <time>"
+  # time = birth if available else mtime, in ISO-ish format if possible.
+  local f="$1"
 
-# ---- MAIN ----
-clear
-
-ARGC=$#
-DEPTH="${1:-}"
-FILTER_RAW="${2:-}"   # If provided => force Selected=0 behavior
-
-# No args => shorthand list
-if [ $ARGC -eq 0 ]; then
-  find . -maxdepth 1 -type f 2>/dev/null | sort
-  exit 0
-fi
-
-# Build ORIGINAL_LIST for header counts / legacy mode
-ORIGINAL_LIST=()
-if is_all_mode "$DEPTH"; then
-  while IFS= read -r f; do ORIGINAL_LIST+=("$f"); done < <(find . -type f 2>/dev/null | sort)
-  MODE_FULL=true
-else
-  if [[ ! "$DEPTH" =~ ^[0-9]+$ ]]; then
-    log_warn "Depth '$DEPTH' is not numeric; defaulting to depth=1"
-    DEPTH=1
+  # GNU stat
+  if have_cmd stat && stat -c '%s' "$f" >/dev/null 2>&1; then
+    local bytes perm birth mtime time
+    bytes="$(stat -c '%s' "$f" 2>/dev/null || echo "")"
+    perm="$(stat -c '%A' "$f" 2>/dev/null || echo "?")"
+    birth="$(stat -c '%w' "$f" 2>/dev/null || echo "")"
+    mtime="$(stat -c '%y' "$f" 2>/dev/null || echo "")"
+    time="$birth"
+    if [ -z "$time" ] || [ "$time" = "-" ] || [ "$time" = "?" ]; then time="$mtime"; fi
+    # trim fractional seconds + timezone
+    time="${time%%.*}"
+    time="${time%% +*}"
+    # KB (ceil-ish): (bytes + 1023) / 1024
+    if [[ "${bytes:-}" =~ ^[0-9]+$ ]]; then
+      local kb=$(( (bytes + 1023) / 1024 ))
+      printf "%s %s %s\n" "$kb" "$perm" "$time"
+    else
+      printf "? %s %s\n" "$perm" "$time"
+    fi
+    return 0
   fi
-  while IFS= read -r f; do ORIGINAL_LIST+=("$f"); done < <(find . -maxdepth "$DEPTH" -type f 2>/dev/null | sort)
-  MODE_FULL=false
-fi
-log_info "Files found: ${#ORIGINAL_LIST[@]}"
 
-TOKENS=()
-# If FILTER is passed -> force 0-selection behavior
-if [ -n "$FILTER_RAW" ]; then
-  # Optional: lightly tokenize for header display (no functional effect)
+  # BSD/macOS stat
+  if have_cmd stat && stat -f '%z' "$f" >/dev/null 2>&1; then
+    local bytes perm birth mtime time
+    bytes="$(stat -f '%z' "$f" 2>/dev/null || echo "")"
+    perm="$(stat -f '%Sp' "$f" 2>/dev/null || echo "?")"
+    # birthtime (%B seconds since epoch) may be 0; mtime (%m)
+    birth="$(stat -f '%B' "$f" 2>/dev/null || echo "0")"
+    mtime="$(stat -f '%m' "$f" 2>/dev/null || echo "0")"
+    if [[ "$birth" =~ ^[0-9]+$ ]] && [ "$birth" -gt 0 ]; then
+      if have_cmd date; then time="$(date -r "$birth" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo "")"; fi
+    fi
+    if [ -z "${time:-}" ]; then
+      if have_cmd date; then time="$(date -r "$mtime" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo "")"; fi
+    fi
+    if [[ "${bytes:-}" =~ ^[0-9]+$ ]]; then
+      local kb=$(( (bytes + 1023) / 1024 ))
+      printf "%s %s %s\n" "$kb" "$perm" "${time:-?}"
+    else
+      printf "? %s %s\n" "$perm" "${time:-?}"
+    fi
+    return 0
+  fi
+
+  printf "? ? ?\n"
+}
+
+is_git_repo() {
+  have_cmd git && git rev-parse --is-inside-work-tree >/dev/null 2>&1
+}
+
+dockerignore_to_grepv() {
+  # Best-effort conversion of .dockerignore to a single grep -Ev regex.
+  # Supports:
+  # - blank lines, comments
+  # - simple paths and globs using * and ?
+  # Does NOT fully implement Docker ignore semantics (no negation handling).
+  local f=".dockerignore"
+  [ -f "$f" ] || return 1
+  local rx=""
   while IFS= read -r line; do
-    line="$(trim "${line%,}")"
-    [ -z "$line" ] || TOKENS+=("$line")
-  done < <(printf "%s" "$FILTER_RAW" | tr -d '[]{}"' | tr "'" ' ' | tr ',\n\t' '   ' | tr ' ' '\n' | sed '/^[[:space:]]*$/d')
+    # strip CR, trim
+    line="${line%$'\r'}"
+    line="${line#"${line%%[![:space:]]*}"}"
+    line="${line%"${line##*[![:space:]]}"}"
+    [ -z "$line" ] && continue
+    [[ "$line" == \#* ]] && continue
+    [[ "$line" == "!"* ]] && continue  # skip negations (best-effort)
+    # normalize leading "./"
+    line="${line#./}"
+    # escape regex special, then unescape globs into regex
+    local part="$line"
+    part="$(printf "%s" "$part" | sed -e 's/[.[\^$+(){}|\\]/\\&/g')"
+    part="$(printf "%s" "$part" | sed -e 's/\*/.*/g' -e 's/\?/./g')"
+    # anchor loosely as path fragment
+    # match either exact path segment or any child under it
+    part="(^|/)$part(/|$)"
+    if [ -z "$rx" ]; then rx="$part"; else rx="$rx|$part"; fi
+  done < "$f"
+  [ -n "$rx" ] || return 1
+  printf "%s\n" "$rx"
+}
 
-  echo "════════════════════════════════════════════════════════════════════════════════════"
-  echo "LSD REPORT"
-  echo "Mode: $([ "$MODE_FULL" = true ] && echo "FULL" || echo "DEPTH")"
-  echo "Arg1: ${DEPTH:-<none>}   Filter tokens: $([ ${#TOKENS[@]:-0} -gt 0 ] && printf "%s" "${TOKENS[*]}" || echo "(provided)")"
-  echo "Filter Resolution: FORCED ZERO-SELECTION (per directive)"
-  echo "Files found: ${#ORIGINAL_LIST[@]}   Selected: 0"
-  echo "════════════════════════════════════════════════════════════════════════════════════"
-  # No dumps. Optionally show Related section if FULL mode is desired (comment out if not wanted):
-  # if [ "$MODE_FULL" = true ]; then
-  #   printf "%s\n" "${ORIGINAL_LIST[@]}" | build_related_section
-  # fi
-  END_TS_EPOCH=$(date +%s)
-  TOTAL_SECS=$((END_TS_EPOCH - START_TS_EPOCH))
-  echo "════════════════════════════════════════════════════════════════════════════════════"
-  echo "SUMMARY: Files dumped: 0   Errors: 0   Elapsed: ${TOTAL_SECS}s"
-  echo "════════════════════════════════════════════════════════════════════════════════════"
-  exit 0
-fi
+emit_files_null_delim() {
+  # Emits file paths (relative) NUL-delimited, ignore-aware.
+  if is_git_repo; then
+    # tracked + untracked, honor .gitignore and core excludes
+    git ls-files -z -co --exclude-standard 2>/dev/null
+    return 0
+  fi
 
-# ---- Legacy path (no Filter): dump everything ----
-echo "════════════════════════════════════════════════════════════════════════════════════"
-echo "LSD REPORT"
-echo "Mode: $([ "$MODE_FULL" = true ] && echo "FULL" || echo "DEPTH")"
-echo "Arg1: ${DEPTH:-<none>}   Filter: (none)"
-echo "Files found: ${#ORIGINAL_LIST[@]}   Selected: ${#ORIGINAL_LIST[@]}"
-echo "════════════════════════════════════════════════════════════════════════════════════"
+  # Not a git repo: approximate ignore behavior using find + prune for common junk.
+  # (.gitignore parsing without git is non-trivial; this is a sane fallback.)
+  find . \
+    -type d \( -name node_modules -o -name .git -o -name dist -o -name build -o -name coverage -o -name .next -o -name .cache \) -prune -false \
+    -o -type f -print0 2>/dev/null
+}
 
-ERR_COUNT=0
-for f in "${ORIGINAL_LIST[@]}"; do
-  [ -f "$f" ] && print_file_colored "$f" || true
-done
+main() {
+  local docker_rx=""
+  if [ -f ".dockerignore" ]; then
+    docker_rx="$(dockerignore_to_grepv 2>/dev/null || true)"
+  fi
 
-if [ "$MODE_FULL" = true ]; then
-  printf "%s\n" "${ORIGINAL_LIST[@]}" | build_related_section
-fi
+  # Collect, filter, sort
+  # - Apply HARD_EXCLUDES
+  # - Apply dockerignore regex if available
+  # - Print formatted metadata
+  emit_files_null_delim \
+    | while IFS= read -r -d '' f; do
+        # normalize leading ./
+        f="${f#./}"
+        [ -z "$f" ] && continue
+        # hard excludes
+        if printf "%s\n" "$f" | grep -Eq "$HARD_EXCLUDES_REGEX"; then
+          continue
+        fi
+        # dockerignore excludes (best-effort)
+        if [ -n "$docker_rx" ] && printf "%s\n" "$f" | grep -Eq "$docker_rx"; then
+          continue
+        fi
+        printf "%s\0" "$f"
+      done \
+    | sort -z \
+    | while IFS= read -r -d '' f; do
+        local ap kb perm time
+        ap="$(abs_path "./$f")"
+        read -r kb perm time < <(stat_kb_perm_time "./$f")
+        printf "✅ %s | %s KB | %s | %s\n" "$ap" "$kb" "$time" "$perm"
+      done
+}
 
-END_TS_EPOCH=$(date +%s)
-TOTAL_SECS=$((END_TS_EPOCH - START_TS_EPOCH))
-echo "════════════════════════════════════════════════════════════════════════════════════"
-echo "SUMMARY: Files dumped: ${#ORIGINAL_LIST[@]}   Errors: $ERR_COUNT   Elapsed: ${TOTAL_SECS}s"
-echo "════════════════════════════════════════════════════════════════════════════════════"
+main "$@"
