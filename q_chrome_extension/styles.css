@@ -10,6 +10,11 @@
   background: black !important;
 }
 
+.nexus-application-distrokid div#skynet-container {
+    display: none;
+}
+
+
 
 .nexus-platforms.nexus-enabled .nexus-application-facebook {
   background-color: #18191a !important;
@@ -1119,12 +1124,12 @@ input.nexus-ticket-wizard-checkbox {
 }
 
 
-div[role="menuitem"]:first-child {
+/* div[role="menuitem"]:first-child {
   display: block !important;
   visibility:inherit !important;
   height: 0;
   height: 0;
-}
+} */
 
 div[role="menuitem"] {
   display: none;
