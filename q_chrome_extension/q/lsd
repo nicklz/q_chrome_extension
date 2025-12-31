@@ -38,13 +38,54 @@
 #       - FILTER:   “lsd a requirements.txt, README.md”
 #     (No /tmp paths, no internal function args, no “SELECTED filter”.)
 #   • Also shows “Planned files: <number>” and “[Q] Version 5.2”
+#
+# -------------------------------------------------------------------------------------
+# PATCH NOTES (applies ONLY when scope starts with: lsd a ...)
+#   • Output chunking in legacy/filter loops (default 3 files per chunk + 1s pause)
+#   • Aggressive pruning of dependency/build/cache dirs across many languages/package managers
+#     (node_modules, vendor, target, dist, build, etc.) to prevent huge repo hangs.
+#   • Performance optimizations: prune (no traversal), cached file sizes, fewer external calls,
+#     faster text detection, capped per-file tag clouds.
+# -------------------------------------------------------------------------------------
 # =====================================================================================
 clear
 set -u
 
+# ---------------------------------------------------------------------
+# macOS compatibility: require Bash >= 4 (associative arrays, namerefs, mapfile)
+# On macOS, /bin/bash is usually 3.2 and will break this script.
+# Auto-reexec into Homebrew bash if available.
+# ---------------------------------------------------------------------
+if [[ -z "${BASH_VERSINFO:-}" || "${BASH_VERSINFO[0]}" -lt 4 ]]; then
+  # Prefer Apple Silicon Homebrew path, then Intel Homebrew path
+  for B in /opt/homebrew/bin/bash /usr/local/bin/bash; do
+    if [[ -x "$B" ]]; then
+      exec "$B" "$0" "$@"
+    fi
+  done
+
+  echo "error: Bash >= 4 is required (associative arrays, nameref, mapfile)."
+  echo "error: macOS default /bin/bash is usually 3.2."
+  echo "fix:"
+  echo "  brew install bash"
+  echo "  then re-run: $0 $*"
+  exit 2
+fi
+
+
 # Capture a clean display of user's invocation for later (sanitized)
 SCRIPT_BASENAME="$(basename "$0")"
 RAW_ARGS="$*"
+
+# Only apply chunking + aggressive pruning + extra optimization when the scope is "a"
+A_MODE=false
+if [[ "$#" -gt 0 && "$1" == "a" ]]; then
+  A_MODE=true
+fi
+
+# Chunking controls (ONLY used in 'a' modes)
+CHUNK_SIZE="${LSD_CHUNK_SIZE:-3}"
+CHUNK_SLEEP="${LSD_CHUNK_SLEEP:-1}"
 
 echo -e "\n\n🚀✨🤖 FILE DUMP — SUPER MODE 🤖✨🚀"
 echo -e "📂 Scan Target: \033[1m.\033[0m ⏱ $(date '+%Y-%m-%d %H:%M:%S') 🧠 Analytics: ON"
@@ -60,6 +101,7 @@ IS_LINUX=false
 [[ "$OS_TYPE" == "Linux"  ]] && IS_LINUX=true
 
 # Exclusions (keep *.json INCLUDED)
+# NOTE: These are the ORIGINAL patterns (preserved for non-'a' scopes).
 EXCLUDE_PATTERNS=(
   "*/.git/*" "*/__pycache__/*" "*/env/*" "*/venv/*"
   "*/*/env/*" "**/data/*" "*.png" "*.jpg"
@@ -77,17 +119,296 @@ EXCLUDE_PATTERNS=(
 # Binary-like extensions (never cat)
 BINARY_EXTENSIONS="jpg|jpeg|png|gif|bmp|ico|webp|pdf|mp3|mp4|mov|zip|tar|gz|gzip|bz2|xz|7z|exe|dll|so|dylib|bin|ttf|otf|woff|woff2|glb"
 
-# Convert exclusions to find switches
+# Convert exclusions to find switches (legacy/non-'a' scopes)
 EXCLUDES=()
 for PATTERN in "${EXCLUDE_PATTERNS[@]}"; do
   EXCLUDES+=( -not -path "$PATTERN" )
 done
 
 # ---------------------------------------------------------------------
+# Ultra-prune dirs (ONLY used in 'a' modes) to avoid massive dependency trees
+# ---------------------------------------------------------------------
+# We prune by *directory name* so it works anywhere in the tree (not just ./node_modules).
+PRUNE_DIR_NAMES=(
+  # VCS
+  ".git" ".hg" ".svn" ".bzr"
+
+  # Node / JS package managers + tooling caches
+  "node_modules" "bower_components" "jspm_packages"
+  ".npm" ".yarn" ".pnpm-store" ".parcel-cache" ".turbo" ".vite" ".next" ".nuxt" ".svelte-kit" ".astro" ".vercel"
+
+  # Python
+  "__pycache__" ".pytest_cache" ".mypy_cache" ".ruff_cache" ".tox" "venv" ".venv" "env" ".eggs" ".hypothesis"
+
+  # PHP / Go / general vendoring
+  "vendor"
+
+  # Terraform
+  ".terraform"
+
+  # Java / Gradle / Maven / Kotlin / Scala
+  "target" ".gradle"
+
+  # .NET
+  "bin" "obj"
+
+  # Builds / distributions (common across languages)
+  "build" ".build" "dist" "out" ".out" "coverage" ".nyc_output"
+
+  # iOS / macOS
+  "Pods" "Carthage" "DerivedData" ".swiftpm"
+
+  # Dart / Flutter
+  ".dart_tool" ".pub-cache"
+
+  # Elixir / Erlang
+  "_build" "deps"
+
+  # Haskell
+  ".stack-work" "dist-newstyle"
+
+  # CMake
+  "CMakeFiles"
+
+  # IDE/editor
+  ".idea" ".vscode"
+
+  # Misc caches
+  ".cache"
+)
+
+# Some prune patterns are best expressed as globs
+PRUNE_DIR_GLOBS=(
+  "cmake-build-*"
+)
+
+# Extra file/path exclusions for 'a' modes (we keep the original list AND add some)
+EXCLUDE_PATTERNS_A_MODE=(
+  "${EXCLUDE_PATTERNS[@]}"
+  # Make root-only patterns apply anywhere (defensive, even though we prune)
+  "*/node_modules/*"
+  "*/vendor/*"
+  "*/.terraform/*"
+  "*/.cache/*"
+)
+
+EXCLUDES_A_MODE=()
+for PATTERN in "${EXCLUDE_PATTERNS_A_MODE[@]}"; do
+  EXCLUDES_A_MODE+=( -not -path "$PATTERN" )
+done
+
+# ---------------------------------------------------------------------
+# Global caches (ONLY populated/used when A_MODE=true)
+# ---------------------------------------------------------------------
+ALL_FILES_BUILT=false
+declare -a ALL_FILES
+declare -A FILE_SIZE_BYTES
+declare -A FILE_SIZE_KB
+declare -A PATH_NORM_SET
+declare -A BASENAME_SET
+declare -A BASENAME_TO_FILES
+declare -A NORMPATH_TO_FILE
+
+# Feature detection (for optimized scans)
+FIND_HAS_PRINTF=false
+if find "$SCAN_DIR" -maxdepth 0 -printf "" >/dev/null 2>&1; then
+  FIND_HAS_PRINTF=true
+fi
+
+SORT_HAS_Z=false
+if printf "" | sort -z >/dev/null 2>&1; then
+  SORT_HAS_Z=true
+fi
+
+have_cmd() { command -v "$1" >/dev/null 2>&1; }
+
+# Normalize leading "./" away for consistent comparisons
+strip_leading_dotslash() {
+  local v="$1"
+  [[ "$v" == ./* ]] && echo "${v:2}" || echo "$v"
+}
+
+# Build find args for pruning (only used in 'a' modes)
+build_prune_match_args() {
+  local -n _out="$1"
+  _out=()
+  local first=true
+
+  for dn in "${PRUNE_DIR_NAMES[@]}"; do
+    if $first; then
+      _out+=( -name "$dn" )
+      first=false
+    else
+      _out+=( -o -name "$dn" )
+    fi
+  done
+
+  for dg in "${PRUNE_DIR_GLOBS[@]}"; do
+    if $first; then
+      _out+=( -name "$dg" )
+      first=false
+    else
+      _out+=( -o -name "$dg" )
+    fi
+  done
+}
+
+# Build (and cache) ALL_FILES + sizes + lookup maps (ONLY for 'a' modes)
+ensure_all_files_built() {
+  $A_MODE || return 0
+  $ALL_FILES_BUILT && return 0
+
+  ALL_FILES=()
+  FILE_SIZE_BYTES=()
+  FILE_SIZE_KB=()
+  PATH_NORM_SET=()
+  BASENAME_SET=()
+  BASENAME_TO_FILES=()
+  NORMPATH_TO_FILE=()
+
+  local -a PRUNE_MATCH=()
+  build_prune_match_args PRUNE_MATCH
+
+  if $FIND_HAS_PRINTF; then
+    local -a FIND_CMD=(find "$SCAN_DIR"
+      "(" -type d "(" "${PRUNE_MATCH[@]}" ")" -prune ")"
+      -o -type f "${EXCLUDES_A_MODE[@]}"
+      -printf "%p\t%s\0"
+    )
+
+    if $SORT_HAS_Z; then
+      while IFS=$'\t' read -r -d '' p b; do
+        [[ -f "$p" ]] || continue
+        ALL_FILES+=("$p")
+        FILE_SIZE_BYTES["$p"]="$b"
+        FILE_SIZE_KB["$p"]="$(( (b + 1023) / 1024 ))"
+
+        norm="$(strip_leading_dotslash "$p")"
+        base="${p##*/}"
+        PATH_NORM_SET["$norm"]=1
+        BASENAME_SET["$base"]=1
+        BASENAME_TO_FILES["$base"]+="$p"$'\n'
+        NORMPATH_TO_FILE["$norm"]="$p"
+      done < <( "${FIND_CMD[@]}" | LC_ALL=C sort -z )
+    else
+      while IFS=$'\t' read -r -d '' p b; do
+        [[ -f "$p" ]] || continue
+        ALL_FILES+=("$p")
+        FILE_SIZE_BYTES["$p"]="$b"
+        FILE_SIZE_KB["$p"]="$(( (b + 1023) / 1024 ))"
+
+        norm="$(strip_leading_dotslash "$p")"
+        base="${p##*/}"
+        PATH_NORM_SET["$norm"]=1
+        BASENAME_SET["$base"]=1
+        BASENAME_TO_FILES["$base"]+="$p"$'\n'
+        NORMPATH_TO_FILE["$norm"]="$p"
+      done < <( "${FIND_CMD[@]}" )
+    fi
+  else
+    # Fallback: no -printf; do a prune + print0, then stat each file
+    local -a FIND_CMD=(find "$SCAN_DIR"
+      "(" -type d "(" "${PRUNE_MATCH[@]}" ")" -prune ")"
+      -o -type f "${EXCLUDES_A_MODE[@]}"
+      -print0
+    )
+
+    local -a files=()
+    if $SORT_HAS_Z; then
+      # sort -z can sort NUL-terminated records
+      while IFS= read -r -d '' f; do
+        files+=("$f")
+      done < <( "${FIND_CMD[@]}" | LC_ALL=C sort -z )
+    else
+      while IFS= read -r -d '' f; do
+        files+=("$f")
+      done < <( "${FIND_CMD[@]}" )
+    fi
+
+    for p in "${files[@]}"; do
+      [[ -f "$p" ]] || continue
+      local b=0
+      if $IS_LINUX && have_cmd stat; then
+        b="$(stat -c %s "$p" 2>/dev/null || echo 0)"
+      elif $IS_MAC && have_cmd stat; then
+        b="$(stat -f %z "$p" 2>/dev/null || echo 0)"
+      else
+        b="$(wc -c < "$p" 2>/dev/null | tr -d ' ' || echo 0)"
+      fi
+
+      ALL_FILES+=("$p")
+      FILE_SIZE_BYTES["$p"]="$b"
+      FILE_SIZE_KB["$p"]="$(( (b + 1023) / 1024 ))"
+
+      norm="$(strip_leading_dotslash "$p")"
+      base="${p##*/}"
+      PATH_NORM_SET["$norm"]=1
+      BASENAME_SET["$base"]=1
+      BASENAME_TO_FILES["$base"]+="$p"$'\n'
+      NORMPATH_TO_FILE["$norm"]="$p"
+    done
+  fi
+
+  ALL_FILES_BUILT=true
+}
+
+# ---------------------------------------------------------------------
 # Collapsed directory tree (always first)
 # ---------------------------------------------------------------------
 print_directory_tree_collapsed() {
   echo -e "\n📦 Directory Tree with File Sizes (in KB):\n"
+
+  # For non-'a' scopes: keep the ORIGINAL implementation (identical behavior).
+  if ! $A_MODE; then
+    declare -A BUCKET_COUNT
+    declare -A BUCKET_SIZE
+    declare -A BUCKET_TOP3 # "size|path" lines
+
+    detect_bucket() {
+      local p="$1"
+      local IFS='/'
+      read -ra parts <<< "${p#./}"
+      local cur="./"
+      for seg in "${parts[@]}"; do
+        cur="${cur%/}/$seg"
+        if [[ "$seg" == "node_modules" || "$seg" == "vendor" || "$seg" == ".terraform" || "$seg" == template* ]]; then
+          echo "$cur/"
+          return 0
+        fi
+      done
+      echo ""
+    }
+
+    while IFS= read -r -d '' file; do
+      [[ -f "$file" ]] || continue
+      local_size_kb=$(du -k "$file" | cut -f1)
+      bucket="$(detect_bucket "$file")"
+      if [[ -n "$bucket" ]]; then
+        BUCKET_COUNT["$bucket"]=$(( ${BUCKET_COUNT["$bucket"]:-0} + 1 ))
+        BUCKET_SIZE["$bucket"]=$(( ${BUCKET_SIZE["$bucket"]:-0} + local_size_kb ))
+        entry="$(printf "%012d|%s" "$local_size_kb" "$file")"
+        BUCKET_TOP3["$bucket"]+="${entry}"$'\n'
+      else
+        printf "%s [%sKB]\n" "$file" "$local_size_kb"
+      fi
+    done < <(find "$SCAN_DIR" -type f "${EXCLUDES[@]}" -print0 | sort -z)
+
+    for b in "${!BUCKET_COUNT[@]}"; do
+      top3="$(printf "%s" "${BUCKET_TOP3["$b"]}" | sed '/^$/d' | sort -r | head -n 3 | cut -d'|' -f2-)"
+      t1="$(echo "$top3" | sed -n '1p' | awk -F/ '{print $NF}')"
+      t2="$(echo "$top3" | sed -n '2p' | awk -F/ '{print $NF}')"
+      t3="$(echo "$top3" | sed -n '3p' | awk -F/ '{print $NF}')"
+      printf "%s [#%d files; %sKB] Top3: %s%s%s\n" \
+        "$b" "${BUCKET_COUNT["$b"]}" "${BUCKET_SIZE["$b"]}" \
+        "${t1:-—}" \
+        "${t2:+, $t2}" \
+        "${t3:+, $t3}"
+    done
+    return 0
+  fi
+
+  # 'a' scopes: optimized + pruned scan (no traversal into giant dependency dirs)
+  ensure_all_files_built
 
   declare -A BUCKET_COUNT
   declare -A BUCKET_SIZE
@@ -108,9 +429,9 @@ print_directory_tree_collapsed() {
     echo ""
   }
 
-  while IFS= read -r -d '' file; do
+  for file in "${ALL_FILES[@]}"; do
     [[ -f "$file" ]] || continue
-    local_size_kb=$(du -k "$file" | cut -f1)
+    local_size_kb="${FILE_SIZE_KB["$file"]:-0}"
     bucket="$(detect_bucket "$file")"
     if [[ -n "$bucket" ]]; then
       BUCKET_COUNT["$bucket"]=$(( ${BUCKET_COUNT["$bucket"]:-0} + 1 ))
@@ -120,7 +441,7 @@ print_directory_tree_collapsed() {
     else
       printf "%s [%sKB]\n" "$file" "$local_size_kb"
     fi
-  done < <(find "$SCAN_DIR" -type f "${EXCLUDES[@]}" -print0 | sort -z)
+  done
 
   for b in "${!BUCKET_COUNT[@]}"; do
     top3="$(printf "%s" "${BUCKET_TOP3["$b"]}" | sed '/^$/d' | sort -r | head -n 3 | cut -d'|' -f2-)"
@@ -147,16 +468,43 @@ TOP_BIGGEST_FILES=3
 TOP_BIGGEST_WORDS=3
 PER_FILE_WORDS=8
 
-have_cmd() { command -v "$1" >/dev/null 2>&1; }
-
 normalize_text() {
-  tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9_]/ /g' | tr -s '[:space:]' '\n' | sed '/^$/d'
+  # Faster normalization (fewer processes): lowercase + convert non-token runs to '\n'
+  tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9_' '\n' | sed '/^$/d'
 }
 
 filesize_bytes() {
-  if du -b "$1" >/dev/null 2>&1; then du -b "$1" | cut -f1
-  else wc -c < "$1" | tr -d ' '
+  local f="$1"
+  # Use cached sizes when available (A_MODE)
+  if $A_MODE; then
+    local v="${FILE_SIZE_BYTES["$f"]:-}"
+    if [[ -n "$v" ]]; then
+      echo "$v"
+      return 0
+    fi
   fi
+
+  if $IS_LINUX && have_cmd stat; then
+    stat -c %s "$f" 2>/dev/null || wc -c < "$f" | tr -d ' '
+  elif $IS_MAC && have_cmd stat; then
+    stat -f %z "$f" 2>/dev/null || wc -c < "$f" | tr -d ' '
+  else
+    wc -c < "$f" | tr -d ' '
+  fi
+}
+
+filesize_kb() {
+  local f="$1"
+  if $A_MODE; then
+    local v="${FILE_SIZE_KB["$f"]:-}"
+    if [[ -n "$v" ]]; then
+      echo "$v"
+      return 0
+    fi
+  fi
+  local b
+  b="$(filesize_bytes "$f" 2>/dev/null || echo 0)"
+  echo "$(( (b + 1023) / 1024 ))"
 }
 
 fullpath_of() {
@@ -170,10 +518,44 @@ fullpath_of() {
 is_binary_by_ext() { [[ "$1" =~ \.($BINARY_EXTENSIONS)$ ]] ; }
 is_json_file() { [[ "$1" =~ \.json$ ]]; }
 
-word_counts_file() {
-  normalize_text < "$1" \
+# Fast-ish text detection (avoid calling `file` on every file)
+is_text_file_fast() {
+  local f="$1"
+
+  # Extension-based fast-path for common text
+  local base="${f##*/}"
+  local ext="${base##*.}"
+
+  # Treat dotfiles without extension as text in many cases
+  case "$base" in
+    Makefile|Dockerfile|CMakeLists.txt|Gemfile|Rakefile|Brewfile|Podfile|Pipfile|Procfile) return 0 ;;
+    .* ) : ;; # fall through to grep check
+  esac
+
+  case "${ext,,}" in
+    txt|md|markdown|rst|adoc|log|csv|tsv|ini|cfg|conf|toml|yml|yaml|json|xml|html|htm|css|scss|less|sql|graphql|gql|proto|properties|gradle|env|lock|make|mk|dockerfile|gitignore|gitattributes|editorconfig|sh|bash|zsh|fish|ps1|py|pyi|js|mjs|cjs|ts|tsx|jsx|java|kt|kts|go|rs|c|h|cpp|hpp|cc|cs|php|rb|pl|pm|lua|swift|m|mm|r|jl) return 0 ;;
+  esac
+
+  # Heuristic: grep -Iq is typically much faster than `file` and stops early on binary
+  LC_ALL=C grep -Iq . "$f" 2>/dev/null
+}
+
+word_counts_stream() {
+  normalize_text \
   | awk '{f[$0]++} END{for(w in f) print w, f[w]}' \
-  | sort -k2,2nr -k1,1
+  | LC_ALL=C sort -k2,2nr -k1,1
+}
+
+word_counts_file_capped() {
+  local f="$1"
+  local cap="$2"
+  local b
+  b="$(filesize_bytes "$f" 2>/dev/null || echo 0)"
+  if [[ "$b" -gt "$cap" ]]; then
+    head -c "$cap" "$f" | word_counts_stream
+  else
+    normalize_text < "$f" | awk '{f[$0]++} END{for(w in f) print w, f[w]}' | LC_ALL=C sort -k2,2nr -k1,1
+  fi
 }
 
 ngrams_scored() {
@@ -196,7 +578,7 @@ ngrams_scored() {
         print k, sc, c[k], L[k];
       }
     }' \
-  | sort -k2,2nr -k3,3nr
+  | LC_ALL=C sort -k2,2nr -k3,3nr
 }
 
 longest_rarest_token() {
@@ -204,7 +586,13 @@ longest_rarest_token() {
   | awk '{f[$0]++} END{max=0;best="";for(w in f){if(f[w]==1 && length(w)>max){max=length(w);best=w}} if(best!="")print best}'
 }
 
+# Build all files array (wrapper)
 build_all_files_array() {
+  if $A_MODE; then
+    ensure_all_files_built
+    return 0
+  fi
+
   ALL_FILES=()
   while IFS= read -r -d '' file; do
     ALL_FILES+=("$file")
@@ -213,15 +601,17 @@ build_all_files_array() {
 
 all_matches_by_basename() {
   local base="$1"
+  if $A_MODE; then
+    # Use cached map for speed (preserves ALL_FILES order because we built it in order)
+    if [[ -n "${BASENAME_TO_FILES["$base"]:-}" ]]; then
+      printf "%s" "${BASENAME_TO_FILES["$base"]}"
+    fi
+    return 0
+  fi
+
   for f in "${ALL_FILES[@]}"; do
     [[ "${f##*/}" == "$base" ]] && echo "$f"
   done
-}
-
-# Normalize leading "./" away for consistent comparisons
-strip_leading_dotslash() {
-  local v="$1"
-  [[ "$v" == ./* ]] && echo "${v:2}" || echo "$v"
 }
 
 # Filename-like (accept single file or subpath with at least one dot — name and ext are [A-Za-z0-9_-])
@@ -301,12 +691,15 @@ print_file_header_banner() {
 
   echo "📄 Path: $FULLPATH"
   echo "📏 Size: ${SIZE_KB}KB (${SIZE_BYTES} bytes)"
-  if ! is_binary_by_ext "$FILE" && file "$FILE" | grep -qE 'text'; then
+
+  if ! is_binary_by_ext "$FILE" && is_text_file_fast "$FILE"; then
     echo "☁️  Tag Cloud (top ${PER_FILE_WORDS}):"
-    word_counts_file "$FILE" | head -n "$PER_FILE_WORDS" | awk '{printf "  %-20s %s\n",$1,$2}'
+    # Cap tag-cloud scan to MAX_PRINT_BYTES for speed (matches print/analytics cap behavior)
+    word_counts_file_capped "$FILE" "$MAX_PRINT_BYTES" | head -n "$PER_FILE_WORDS" | awk '{printf "  %-20s %s\n",$1,$2}'
   else
     echo "☁️  Tag Cloud: (binary-like; skipped)"
   fi
+
   echo "────────────────────────────────────────────────────────────────────────────────"
 }
 
@@ -331,7 +724,9 @@ print_analytics_and_verification() {
   echo "════════════════════════════════════════════════════════════════════════════════"
 
   if [[ "$RELATED_MODE" == "filter" ]]; then
-    build_all_files_array
+    # ALL_FILES is already built in filter mode; avoid re-scanning.
+    $A_MODE && ensure_all_files_built
+
     local after=""; after="${DISPLAY_CMD#lsd a }"
     mapfile -t TOKS < <(parse_filter_tokens_from_args "$after")
 
@@ -366,7 +761,7 @@ print_analytics_and_verification() {
         if is_binary_by_ext "$rf"; then
           echo " (binary-like; mini wordcloud skipped)"
         else
-          word_counts_file "$rf" | head -n $TOP_RELATED_WORDS | awk '{printf " %-20s %s\n",$1,$2}'
+          word_counts_file_capped "$rf" "$MAX_PRINT_BYTES" | head -n $TOP_RELATED_WORDS | awk '{printf " %-20s %s\n",$1,$2}'
         fi
       done < "$TMP_REL"
       rm -f "$TMP_REL"
@@ -380,7 +775,7 @@ print_analytics_and_verification() {
   if [[ -s "$TMP_ALL_TEXT" ]]; then
     echo -e "\n📈 Top $TOP_WORDS_COUNT Words (selected files):"
     TMP_WORDS=$(mktemp)
-    normalize_text < "$TMP_ALL_TEXT" | awk '{f[$0]++} END{for(w in f) print w, f[w]}' | sort -k2,2nr -k1,1 > "$TMP_WORDS"
+    normalize_text < "$TMP_ALL_TEXT" | awk '{f[$0]++} END{for(w in f) print w, f[w]}' | LC_ALL=C sort -k2,2nr -k1,1 > "$TMP_WORDS"
     head -n $TOP_WORDS_COUNT "$TMP_WORDS" | awk '{printf " %-20s %s\n",$1,$2}'
 
     echo -e "\n🧬 Top $TOP_NGRAMS N-Gram Chains (score=count+10*len, up to len=5):"
@@ -395,12 +790,12 @@ print_analytics_and_verification() {
       printf "%015d\t%s\n" "$(filesize_bytes "$f")" "$f" >> "$TMP_SIZES"
     done
     if [ -s "$TMP_SIZES" ]; then
-      sort -r "$TMP_SIZES" | head -n $TOP_BIGGEST_FILES | cut -f2- | while read -r bf; do
+      LC_ALL=C sort -r "$TMP_SIZES" | head -n $TOP_BIGGEST_FILES | cut -f2- | while read -r bf; do
         echo "• $bf"
         if is_binary_by_ext "$bf"; then
           echo " (binary-like; wordcloud skipped)"
         else
-          word_counts_file "$bf" | head -n $TOP_BIGGEST_WORDS | awk '{printf " %-20s %s\n",$1,$2}'
+          word_counts_file_capped "$bf" "$MAX_PRINT_BYTES" | head -n $TOP_BIGGEST_WORDS | awk '{printf " %-20s %s\n",$1,$2}'
         fi
       done
     else
@@ -463,11 +858,13 @@ if [[ "$#" -gt 0 ]]; then
     TMP_ALL_TEXT="$(mktemp)"
     SELECTED=()
 
+    CHUNK_I=0
+
     if [ "$FILE_COUNT" -eq 0 ]; then
       echo "🚫 No files found."
     else
       for FILE in "${ALL_FILES[@]}"; do
-        FILE_SIZE_KB=$(du -k "$FILE" | cut -f1)
+        FILE_SIZE_KB="$(filesize_kb "$FILE")"
         print_file_header_banner "$FILE" "$FILE_SIZE_KB"
 
         SELECTED+=("$FILE")
@@ -483,7 +880,7 @@ if [[ "$#" -gt 0 ]]; then
           fi
         elif is_binary_by_ext "$FILE"; then
           echo "⚠️ Skipping image or binary file by extension."
-        elif file "$FILE" | grep -qE 'text'; then
+        elif is_text_file_fast "$FILE"; then
           SIZE_BYTES=$(filesize_bytes "$FILE")
           if [ "$SIZE_BYTES" -gt "$MAX_PRINT_BYTES" ]; then
             echo "⚠️ Large file (>300KB). Displaying partial content."
@@ -499,6 +896,13 @@ if [[ "$#" -gt 0 ]]; then
         fi
 
         echo -e "\n────────────────────────────────────────────────────────────────────────────────"
+
+        # Chunking: pause every CHUNK_SIZE files to prevent huge repo terminal hangs
+        CHUNK_I=$((CHUNK_I + 1))
+        if [[ "$CHUNK_SIZE" -gt 0 && "$CHUNK_SLEEP" -gt 0 && $((CHUNK_I % CHUNK_SIZE)) -eq 0 ]]; then
+          echo -e "\n⏸️  Chunk pause: processed $CHUNK_I files. Sleeping ${CHUNK_SLEEP}s...\n"
+          sleep "$CHUNK_SLEEP"
+        fi
       done
     fi
 
@@ -539,21 +943,19 @@ if [[ "$#" -gt 0 ]]; then
 
     # Planned selection — broadened and normalized (counts filename-ish tokens regardless of existence)
     PLANNED_COUNT=0
-    for t in "${FILTER_TOKENS[@]}"; do
-      if is_clean_filename "$t"; then
-        PLANNED_COUNT=$((PLANNED_COUNT+1))
-        continue
-      fi
-      found=0
-      for f in "${ALL_FILES[@]}"; do
-        nf="$(strip_leading_dotslash "$f")"
+    if ((${#FILTER_TOKENS[@]} > 0)); then
+      for t in "${FILTER_TOKENS[@]}"; do
+        if is_clean_filename "$t"; then
+          PLANNED_COUNT=$((PLANNED_COUNT+1))
+          continue
+        fi
+
         nt="$(strip_leading_dotslash "$t")"
-        if [[ "$f" == "$t" || "$nf" == "$nt" || "${f##*/}" == "$t" ]]; then
-          found=1; break
+        if [[ -n "${PATH_NORM_SET["$nt"]:-}" || -n "${BASENAME_SET["$t"]:-}" ]]; then
+          PLANNED_COUNT=$((PLANNED_COUNT+1))
         fi
       done
-      [[ "$found" -eq 1 ]] && PLANNED_COUNT=$((PLANNED_COUNT+1))
-    done
+    fi
 
     echo -e "\n🧭 Scope: \033[1m$SCOPE\033[0m 🎯 Filters: \033[1m${DISPLAY_FILTERS:-<none>}\033[0m 📊 Planned selection: \033[1m$PLANNED_COUNT\033[0m"
     echo -e "\n📚 FILES IN ORDER (FILTER MODE):"
@@ -562,36 +964,46 @@ if [[ "$#" -gt 0 ]]; then
     # Selection: exact PATH (normalized) plus ALL exact BASENAME matches (no substring fallback)
     SELECTED=()
     if ((${#FILTER_TOKENS[@]} > 0)); then
-      # exact paths (normalized both sides)
+      # exact paths (normalized)
       for t in "${FILTER_TOKENS[@]}"; do
         nt="$(strip_leading_dotslash "$t")"
-        for f in "${ALL_FILES[@]}"; do
-          nf="$(strip_leading_dotslash "$f")"
-          [[ "$f" == "$t" || "$nf" == "$nt" ]] && SELECTED+=("$f")
-        done
+        if [[ -n "${NORMPATH_TO_FILE["$nt"]:-}" ]]; then
+          SELECTED+=("${NORMPATH_TO_FILE["$nt"]}")
+        fi
       done
+
       # ALL basenames that match
       for t in "${FILTER_TOKENS[@]}"; do
         base="${t##*/}"
-        while IFS= read -r m; do
-          [[ -n "$m" ]] && SELECTED+=("$m")
-        done < <(all_matches_by_basename "$base")
+        if [[ -n "${BASENAME_TO_FILES["$base"]:-}" ]]; then
+          while IFS= read -r m; do
+            [[ -n "$m" ]] && SELECTED+=("$m")
+          done <<< "${BASENAME_TO_FILES["$base"]}"
+        fi
       done
-      # de-dup (preserve order)
+
+      # de-dup (preserve order) — optimized (no mktemp/awk)
       if ((${#SELECTED[@]} > 0)); then
-        TMP_SEL=$(mktemp)
-        for s in "${SELECTED[@]}"; do echo "$s"; done | awk '!seen[$0]++' > "$TMP_SEL"
-        mapfile -t SELECTED < "$TMP_SEL"
-        rm -f "$TMP_SEL"
+        declare -A _seen_sel
+        _seen_sel=()
+        tmp_sel=()
+        for s in "${SELECTED[@]}"; do
+          [[ -n "${_seen_sel["$s"]:-}" ]] && continue
+          _seen_sel["$s"]=1
+          tmp_sel+=("$s")
+        done
+        SELECTED=( "${tmp_sel[@]}" )
       fi
     fi
 
     TMP_ALL_TEXT="$(mktemp)"
+    CHUNK_I=0
+
     if ((${#SELECTED[@]} == 0)); then
       echo "🚫 Filter matched no files."
     else
       for FILE in "${SELECTED[@]}"; do
-        FILE_SIZE_KB=$(du -k "$FILE" | cut -f1)
+        FILE_SIZE_KB="$(filesize_kb "$FILE")"
         print_file_header_banner "$FILE" "$FILE_SIZE_KB"
 
         if is_json_file "$FILE"; then
@@ -604,7 +1016,7 @@ if [[ "$#" -gt 0 ]]; then
           fi
         elif is_binary_by_ext "$FILE"; then
           echo "⚠️ Skipping image or binary file by extension."
-        elif file "$FILE" | grep -qE 'text'; then
+        elif is_text_file_fast "$FILE"; then
           SIZE_BYTES=$(filesize_bytes "$FILE")
           if [ "$SIZE_BYTES" -gt "$MAX_PRINT_BYTES" ]; then
             echo "⚠️ Large file (>300KB). Displaying partial content."
@@ -620,6 +1032,13 @@ if [[ "$#" -gt 0 ]]; then
         fi
 
         echo -e "\n────────────────────────────────────────────────────────────────────────────────"
+
+        # Chunking: pause every CHUNK_SIZE files to prevent huge repo terminal hangs
+        CHUNK_I=$((CHUNK_I + 1))
+        if [[ "$CHUNK_SIZE" -gt 0 && "$CHUNK_SLEEP" -gt 0 && $((CHUNK_I % CHUNK_SIZE)) -eq 0 ]]; then
+          echo -e "\n⏸️  Chunk pause: processed $CHUNK_I files. Sleeping ${CHUNK_SLEEP}s...\n"
+          sleep "$CHUNK_SLEEP"
+        fi
       done
     fi
 

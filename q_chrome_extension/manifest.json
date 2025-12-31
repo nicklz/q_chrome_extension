@@ -26,9 +26,7 @@
     "scripting",
     "notifications",
     "storage",
-    "tabs",
-    "cookies",
-    "webNavigation"
+    "tabs"
   ],
   "host_permissions": ["*://*/*"],
   "web_accessible_resources": [

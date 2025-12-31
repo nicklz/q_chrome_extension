@@ -1,11 +1,27 @@
 #!/bin/bash
 
-
+sudo ls && sudo pwd
 echo "gitpp: START GIT PULL" | lolcat
 git pull origin master 
 
-echo "gitpp: cd /home/nexus/sites/waypoints/nexus/app/client && npm run build &" | lolcat
+echo "SILENT KILL" | lolcat
+sudo kill -9 $(sudo lsof -t -i:3000 2>/dev/null) 2>/dev/null &
+sudo kill -9 $(sudo lsof -t -i:42069 2>/dev/null) 2>/dev/null &
+sudo kill -9 $(sudo lsof -t -i:8080 2>/dev/null) 2>/dev/null &
+sudo kill -9 $(sudo lsof -t -i:8085 2>/dev/null) 2>/dev/null &
+sudo kill -9 $(sudo lsof -t -i:3077 2>/dev/null) 2>/dev/null &
+sudo kill -9 $(sudo lsof -t -i:3078 2>/dev/null) 2>/dev/null &
+sudo kill -9 $(sudo lsof -t -i:3079 2>/dev/null) 2>/dev/null &
+sudo kill -9 $(sudo lsof -t -i:3080 2>/dev/null) 2>/dev/null &
+
+echo "gitpp: cd /home/nexus/sites/waypoints/nexus/app/client && npm run build &" 
 cd /home/nexus/sites/waypoints/nexus/app/client && nohup npm run build >/dev/null 2>&1 &
+
+lsof -ti:42069 | xargs -r kill -9 && node /home/nexus/sites/waypoints/nexus/app/server/server.js &
+
+echo "gitpp: RankedPicks/client npm run start" | lolcat
+
+cd /home/www-data/sites/waypoints/nexus/scripts/RankedPicks/client && npm run start &
 
 echo "gitpp: CHOWN" | lolcat
 cd ~/sites/waypoints && sudo chown -R www-data:www-data ./* 
@@ -18,11 +34,7 @@ echo "WAIT!!!!!!!" | lolcat
 
 echo "GIT PULL" | lolcat
 
-echo "SILENT KILL" | lolcat
-sudo kill -9 $(sudo lsof -t -i:3000 2>/dev/null) 2>/dev/null &
-sudo kill -9 $(sudo lsof -t -i:42069 2>/dev/null) 2>/dev/null &
-sudo kill -9 $(sudo lsof -t -i:8080 2>/dev/null) 2>/dev/null &
-sudo kill -9 $(sudo lsof -t -i:8085 2>/dev/null) 2>/dev/null &
+
 
 
 

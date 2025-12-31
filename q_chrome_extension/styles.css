@@ -242,6 +242,11 @@
   top: 0px;
   left: 0px;
   height: 44px;
+
+}
+
+.nexus-modal {
+  right: 30px !important;
 }
 
 button.delete-button {
@@ -327,7 +332,7 @@ button.delete-button {
   height: 100%;
   position: fixed;
   top: 0;
-  right: 330px;
+  right: 270px;
   width: auto;
   pointer-events: none;
   z-index: 10000;
@@ -638,6 +643,8 @@ header .absolute {
   padding: 5px 10px;
   cursor: pointer;
   background: #310000 !important;
+  right: 60px !important;;
+  top: 80px !important;
 }
 
 .nexus-platforms.nexus-enabled .close-button:hover {
@@ -1100,7 +1107,7 @@ input.nexus-ticket-wizard-checkbox {
 #menu-tools div.q-status {
   flex-direction: row;
   display: inline-flex;
-  max-width: 84px;
+  max-width: 64px;
 }
 
 .q-status-label {
@@ -1131,13 +1138,13 @@ input.nexus-ticket-wizard-checkbox {
   height: 0;
 } */
 
-div[role="menuitem"] {
+/* div[role="menuitem"] {
   display: none;
 }
 
 div[role="menuitemradio"] {
   display: none;
-}
+} */
 
 .group.__menu-item {}
 
@@ -1323,6 +1330,11 @@ shreddit-ad-post { display: none !important; }
   width: auto;
 }
 
+#menu button {
+  border-radius: 10px !important;
+  padding: 20px !important;
+}
+
 /* #skynet-container #menu button {
   border: 4px double white !important;
   border-radius: 4px;
@@ -1506,4 +1518,9 @@ scrapped might be a bad idea thought of  lines getting in way of chatgpt.com or 
 
 .nexus-enabled.nexus-platforms .nexus-application-runitbyq {
   font-family: 'Major Mono Display';
+}
+
+
+.nexus-modal {
+    right: 0 !important;
 }
