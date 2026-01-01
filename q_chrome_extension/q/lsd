@@ -198,6 +198,27 @@ for PATTERN in "${EXCLUDE_PATTERNS_A_MODE[@]}"; do
 done
 
 # ---------------------------------------------------------------------
+# ✅ FIX: Scan targets support (files/folders passed after `a`)
+#   - If `lsd a <arg1> <arg2> ...` and args exist as paths, we scan ONLY those roots.
+#   - Otherwise default to SCAN_DIR (.)
+#   - This enables "arg 1-N are potential files/folders to print" in FILTER MODE.
+# ---------------------------------------------------------------------
+declare -a SCAN_TARGETS
+SCAN_TARGETS=( "$SCAN_DIR" )
+
+if $A_MODE && [[ "$#" -gt 1 ]]; then
+  SCAN_TARGETS=()
+  for t in "${@:2}"; do
+    if [[ -e "$t" ]]; then
+      SCAN_TARGETS+=( "$t" )
+    fi
+  done
+  if ((${#SCAN_TARGETS[@]} == 0)); then
+    SCAN_TARGETS=( "$SCAN_DIR" )
+  fi
+fi
+
+# ---------------------------------------------------------------------
 # Global caches (ONLY populated/used when A_MODE=true)
 # ---------------------------------------------------------------------
 ALL_FILES_BUILT=false
@@ -211,7 +232,7 @@ declare -A NORMPATH_TO_FILE
 
 # Feature detection (for optimized scans)
 FIND_HAS_PRINTF=false
-if find "$SCAN_DIR" -maxdepth 0 -printf "" >/dev/null 2>&1; then
+if find "${SCAN_TARGETS[0]}" -maxdepth 0 -printf "" >/dev/null 2>&1; then
   FIND_HAS_PRINTF=true
 fi
 
@@ -270,7 +291,7 @@ ensure_all_files_built() {
   build_prune_match_args PRUNE_MATCH
 
   if $FIND_HAS_PRINTF; then
-    local -a FIND_CMD=(find "$SCAN_DIR"
+    local -a FIND_CMD=(find "${SCAN_TARGETS[@]}"
       "(" -type d "(" "${PRUNE_MATCH[@]}" ")" -prune ")"
       -o -type f "${EXCLUDES_A_MODE[@]}"
       -printf "%p\t%s\0"
@@ -307,7 +328,7 @@ ensure_all_files_built() {
     fi
   else
     # Fallback: no -printf; do a prune + print0, then stat each file
-    local -a FIND_CMD=(find "$SCAN_DIR"
+    local -a FIND_CMD=(find "${SCAN_TARGETS[@]}"
       "(" -type d "(" "${PRUNE_MATCH[@]}" ")" -prune ")"
       -o -type f "${EXCLUDES_A_MODE[@]}"
       -print0
@@ -391,7 +412,7 @@ print_directory_tree_collapsed() {
       else
         printf "%s [%sKB]\n" "$file" "$local_size_kb"
       fi
-    done < <(find "$SCAN_DIR" -type f "${EXCLUDES[@]}" -print0 | sort -z)
+    done < <(find "${SCAN_TARGETS[@]}" -type f "${EXCLUDES[@]}" -print0 | sort -z)
 
     for b in "${!BUCKET_COUNT[@]}"; do
       top3="$(printf "%s" "${BUCKET_TOP3["$b"]}" | sed '/^$/d' | sort -r | head -n 3 | cut -d'|' -f2-)"
@@ -586,6 +607,45 @@ longest_rarest_token() {
   | awk '{f[$0]++} END{max=0;best="";for(w in f){if(f[w]==1 && length(w)>max){max=length(w);best=w}} if(best!="")print best}'
 }
 
+# ---------------------------------------------------------------------
+# ✅ FIX: Expand explicit filesystem tokens (file OR directory) into files
+#   - Used by FILTER MODE so directories passed as args will actually print.
+#   - NUL-delimited output for safe parsing.
+# ---------------------------------------------------------------------
+expand_path_to_files_nul() {
+  local target="$1"
+  [[ -n "$target" ]] || return 0
+
+  if [[ -f "$target" ]]; then
+    printf "%s\0" "$target"
+    return 0
+  fi
+
+  if [[ -d "$target" ]]; then
+    local -a PRUNE_MATCH=()
+    if $A_MODE; then
+      build_prune_match_args PRUNE_MATCH
+      local -a CMD=(find "$target"
+        "(" -type d "(" "${PRUNE_MATCH[@]}" ")" -prune ")"
+        -o -type f "${EXCLUDES_A_MODE[@]}"
+        -print0
+      )
+      if $SORT_HAS_Z; then
+        "${CMD[@]}" | LC_ALL=C sort -z
+      else
+        "${CMD[@]}"
+      fi
+    else
+      local -a CMD=(find "$target" -type f "${EXCLUDES[@]}" -print0)
+      if $SORT_HAS_Z; then
+        "${CMD[@]}" | LC_ALL=C sort -z
+      else
+        "${CMD[@]}"
+      fi
+    fi
+  fi
+}
+
 # Build all files array (wrapper)
 build_all_files_array() {
   if $A_MODE; then
@@ -596,7 +656,7 @@ build_all_files_array() {
   ALL_FILES=()
   while IFS= read -r -d '' file; do
     ALL_FILES+=("$file")
-  done < <(find "$SCAN_DIR" -type f "${EXCLUDES[@]}" -print0 | sort -z)
+  done < <(find "${SCAN_TARGETS[@]}" -type f "${EXCLUDES[@]}" -print0 | sort -z)
 }
 
 all_matches_by_basename() {
@@ -920,14 +980,31 @@ if [[ "$#" -gt 0 ]]; then
     # =========================
     # FILTER MODE: "lsd a <filters...>"
     # =========================
+
+    # Keep a raw display string (legacy), but DON'T rely on it for tokenization anymore.
     FILTER_RAW="${*:2}"   # everything after "a"
 
     build_all_files_array
 
-    # Tokenize per rules (JSON first; else comma list)
-    mapfile -t FILTER_TOKENS < <(parse_filter_tokens_from_args "$FILTER_RAW")
+    # ✅ FIX: Tokenize using ARG 2..N as independent tokens (supports multiple files),
+    # while still honoring JSON-array / comma lists when provided as a single arg.
+    FILTER_TOKENS=()
+
+    if [[ "$#" -eq 2 ]]; then
+      # Single filter arg: preserve legacy parsing (JSON array or comma split)
+      mapfile -t FILTER_TOKENS < <(parse_filter_tokens_from_args "$FILTER_RAW")
+    else
+      # Multiple args after 'a': treat each as a separate token (also split commas inside each arg)
+      for arg in "${@:2}"; do
+        mapfile -t _PARTS < <(parse_filter_tokens_from_args "$arg")
+        if ((${#_PARTS[@]} > 0)); then
+          FILTER_TOKENS+=( "${_PARTS[@]}" )
+        fi
+      done
+    fi
 
     # If user provided unquoted second arg (space-delimited) like: lsd a requirements.txt
+    # (kept for backwards compatibility)
     if [[ "${#FILTER_TOKENS[@]}" -eq 0 ]] && second_piece_looks_like_filename "$FILTER_RAW"; then
       read -r _ second _ <<< "$FILTER_RAW"
       FILTER_TOKENS+=("$second")
@@ -945,6 +1022,12 @@ if [[ "$#" -gt 0 ]]; then
     PLANNED_COUNT=0
     if ((${#FILTER_TOKENS[@]} > 0)); then
       for t in "${FILTER_TOKENS[@]}"; do
+        # ✅ directory tokens are now supported selections; count them as planned tokens
+        if [[ -d "$t" ]]; then
+          PLANNED_COUNT=$((PLANNED_COUNT+1))
+          continue
+        fi
+
         if is_clean_filename "$t"; then
           PLANNED_COUNT=$((PLANNED_COUNT+1))
           continue
@@ -964,7 +1047,17 @@ if [[ "$#" -gt 0 ]]; then
     # Selection: exact PATH (normalized) plus ALL exact BASENAME matches (no substring fallback)
     SELECTED=()
     if ((${#FILTER_TOKENS[@]} > 0)); then
-      # exact paths (normalized)
+      # ✅ FIX: If a token is an existing directory or file path, expand it into files to print.
+      # This makes "lsd a dir1 file2 dir3" actually print those.
+      for t in "${FILTER_TOKENS[@]}"; do
+        if [[ -d "$t" || -f "$t" ]]; then
+          while IFS= read -r -d '' xf; do
+            [[ -n "$xf" ]] && SELECTED+=("$xf")
+          done < <(expand_path_to_files_nul "$t")
+        fi
+      done
+
+      # exact file paths (normalized)
       for t in "${FILTER_TOKENS[@]}"; do
         nt="$(strip_leading_dotslash "$t")"
         if [[ -n "${NORMPATH_TO_FILE["$nt"]:-}" ]]; then

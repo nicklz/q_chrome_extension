@@ -34,6 +34,8 @@ function urlMatches(u = "") {
   } catch { return false; }
 }
 
+
+
 // ---- Programmatic tabs->urls provider (used by Tools modal)
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg && msg.type === "GET_TABS_URLS") {
@@ -192,6 +194,109 @@ chrome.runtime.onMessage.addListener((message) => {
     });
   }
 });
+
+
+// ---- Message: CHECK_SITES (health checks from MV3 SW; avoids page CORS)
+chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  if (!msg || msg.type !== "CHECK_SITES") return;
+
+  const sites = Array.isArray(msg.sites) ? msg.sites : [];
+  const timeoutMs = Number(msg.timeoutMs || 9000);
+
+  const normUrl = (u) => {
+    const raw = String(u || "").trim();
+    if (!raw) return "";
+    if (/^https?:\/\//i.test(raw)) return raw;
+    return "https://" + raw.replace(/^\/+/, "");
+  };
+
+  const fetchWithTimeout = async (url) => {
+    const ctl = new AbortController();
+    const to = setTimeout(() => ctl.abort(), timeoutMs);
+    const started = Date.now();
+
+    try {
+      // HEAD first (fast), GET fallback
+      let resp;
+      try {
+        resp = await fetch(url, {
+          method: "HEAD",
+          cache: "no-store",
+          redirect: "follow",
+          signal: ctl.signal,
+        });
+      } catch (_e) {
+        resp = await fetch(url, {
+          method: "GET",
+          cache: "no-store",
+          redirect: "follow",
+          signal: ctl.signal,
+        });
+      }
+
+      clearTimeout(to);
+
+      const ms = Date.now() - started;
+      const status = typeof resp.status === "number" ? resp.status : 0;
+      const ok = resp && (resp.ok === true || (status >= 200 && status < 400));
+
+      return {
+        ok: !!ok,
+        status,
+        ms,
+        finalUrl: resp && resp.url ? resp.url : url,
+        error: "",
+      };
+    } catch (e) {
+      clearTimeout(to);
+      const ms = Date.now() - started;
+      return {
+        ok: false,
+        status: 0,
+        ms,
+        finalUrl: url,
+        error: e && e.message ? String(e.message) : "fetch failed",
+      };
+    }
+  };
+
+  const run = async () => {
+    // Concurrency cap (prevents SW spikes)
+    const limit = 6;
+    const results = new Array(sites.length);
+    let i = 0;
+
+    const worker = async () => {
+      while (i < sites.length) {
+        const idx = i++;
+        const s = sites[idx] || {};
+        const name = String(s.name || `site_${idx}`);
+        const url = normUrl(s.url);
+
+        if (!url) {
+          results[idx] = { name, url: "", ok: false, status: 0, ms: 0, error: "missing url" };
+          continue;
+        }
+
+        const r = await fetchWithTimeout(url);
+        results[idx] = { name, url, ...r };
+      }
+    };
+
+    const workers = [];
+    for (let k = 0; k < Math.min(limit, sites.length); k++) workers.push(worker());
+    await Promise.all(workers);
+
+    return results;
+  };
+
+  run()
+    .then((results) => sendResponse({ ok: true, results }))
+    .catch((e) => sendResponse({ ok: false, error: e && e.message ? String(e.message) : "CHECK_SITES failed" }));
+
+  return true; // async response
+});
+
 
 
 // background.js ADD THIS LISTENER (append at bottom; no refactors)

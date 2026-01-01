@@ -25,7 +25,7 @@ cd /home/www-data/sites/waypoints/nexus/scripts/RankedPicks/client && npm run st
 
 echo "gitpp: CHOWN" | lolcat
 cd ~/sites/waypoints && sudo chown -R www-data:www-data ./* 
-cd /home/nexus/sites/waypoints/nexus/template11/app  && npm run build &
+
 cd /home/nexus/sites/waypoints/nexus/template13/app  && npm run build &
 cd ~/sites/waypoints
 
