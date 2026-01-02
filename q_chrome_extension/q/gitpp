@@ -14,14 +14,14 @@ sudo kill -9 $(sudo lsof -t -i:3078 2>/dev/null) 2>/dev/null &
 sudo kill -9 $(sudo lsof -t -i:3079 2>/dev/null) 2>/dev/null &
 sudo kill -9 $(sudo lsof -t -i:3080 2>/dev/null) 2>/dev/null &
 
-echo "gitpp: cd /home/nexus/sites/waypoints/nexus/app/client && npm run build &" 
-cd /home/nexus/sites/waypoints/nexus/app/client && nohup npm run build >/dev/null 2>&1 &
+echo "gitpp: cd /home/nexus/sites/waypoints/nexus/scripts/RunItByQ/client && npm run build &" 
+cd /home/nexus/sites/waypoints/nexus/scripts/RunItByQ/client && nohup npm run build >/dev/null 2>&1 &
 
-lsof -ti:42069 | xargs -r kill -9 && node /home/nexus/sites/waypoints/nexus/app/server/server.js &
+lsof -ti:42069 | xargs -r kill -9 && node /home/nexus/sites/waypoints/nexus/scripts/RunItByQ/server/server.js &
 
 echo "gitpp: RankedPicks/client npm run start" | lolcat
 
-cd /home/www-data/sites/waypoints/nexus/scripts/RankedPicks/client && npm run start &
+cd /home/nexus/sites/waypoints/nexus/scripts/RankedPicks/client && npm run start &
 
 echo "gitpp: CHOWN" | lolcat
 cd ~/sites/waypoints && sudo chown -R www-data:www-data ./* 
@@ -62,4 +62,4 @@ echo "📝📝📝 🪓🪓🪓 FOR LOGGING:" | lolcat
 echo " tail -f /var/log/nginx/error.log" | lolcat
 echo "sudo journalctl -g 'NEXUS' -f" | lolcat
 
-cd /home/nexus/sites/waypoints/nexus/app/ && yarn dev
+cd /home/nexus/sites/waypoints/nexus/scripts/RunItByQ/ && yarn dev

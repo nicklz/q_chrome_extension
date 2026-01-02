@@ -1,19 +1,34 @@
 #!/usr/bin/env bash
+set -euo pipefail
 
-# Load environment variables from the .env file
-ENV_FILE="$(dirname "$0")/../.env"
-
+# Load environment variables from the .env file (best effort)
+ENV_FILE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/.env"
 if [ -f "$ENV_FILE" ]; then
-    export $(grep -v '^#' "$ENV_FILE" | xargs)
+  set -a
+  # shellcheck disable=SC1090
+  . "$ENV_FILE" || true
+  set +a
 fi
 
-# Ensure PROJECT_PATH is set
-if [ -z "$INSTALL_PATH" ]; then
-    echo "Error: PROJECT_PATH is not set in .env"
-    exit 1
+# Resolve repo root (q/ is inside repo root)
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# Ensure INSTALL_PATH is set (fallback to repo root)
+INSTALL_PATH="$REPO_ROOT"
+
+# Prefer venv python if present
+VENV_PY="${REPO_ROOT}/tts_env/bin/python"
+if [ -x "$VENV_PY" ]; then
+  PY="$VENV_PY"
+else
+  PY="$(command -v python3)"
 fi
 
-SCRIPT_PATH="$INSTALL_PATH/q/a.py"
+SCRIPT_PATH="${INSTALL_PATH}/q/a.py"
+if [ ! -f "$SCRIPT_PATH" ]; then
+  echo "Error: a.py not found at: $SCRIPT_PATH" >&2
+  exit 1
+fi
 
-# Execute the script and log the output
-python3 "$SCRIPT_PATH" "$1" | sed 's/Answer://gi'
+# Execute the script; pass full args; strip 'Answer:' prefix
+"$PY" "$SCRIPT_PATH" "$@" | sed 's/Answer://gi'
