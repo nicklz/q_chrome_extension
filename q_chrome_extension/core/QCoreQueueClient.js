@@ -469,22 +469,23 @@ function currentQID() {
       if (hasManifest) {
         const items = Array.isArray(state.response) ? state.response : [];
         if (items.length) {
+          // BATCH SIZE FINDME
           const batchSize = 5;
           const delay = (ms) => new Promise(r=>setTimeout(r, ms));
           for (let i=0;i<items.length;i+=batchSize) {
             const batch = items.slice(i, i+batchSize);
             await Promise.all(batch.map(async it => {
-              const _qid  = currentQID();
-              const _path = normalizeSandboxPath(it.filepath || `/tmp/${_qid}.txt`);
-              await QNewTab(_qid, _path, String(it.content ?? ''));
+              
+              const _path = normalizeSandboxPath(it.filepath || `/tmp/${it.qid}.txt`);
+              await QNewTab(it.qid, _path, String(it.content ?? ''));
             }));
-            if (i + batchSize < items.length) await delay(15000);
+            if (i + batchSize < items.length) await delay(20000);
           }
-          if (window.QCoreStatusLoop && typeof window.QCoreStatusLoop.generateQ === 'function') {
-            state = await window.QCoreStatusLoop.generateQ(state);
-            state.run_count = (state.run_count || 0) + 1;
-            setState(state);
-          }
+          // if (window.QCoreStatusLoop && typeof window.QCoreStatusLoop.generateQ === 'function') {
+          //   state = await window.QCoreStatusLoop.generateQ(state);
+          //   state.run_count = (state.run_count || 0) + 1;
+          //   setState(state);
+          // }
         }
       } else {
         await QFileWrite(qid, filepath, state.response ?? content, state);
