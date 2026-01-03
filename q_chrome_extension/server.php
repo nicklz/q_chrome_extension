@@ -935,7 +935,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $uri === '/q_run') {
     qlog('POST /q_run $post', 10);
         update_queue_item($qid, [
             'queue_status' => 'status',
-            'result'       => $raw['state'],
+            'result'       => $post['state'],
             'errors'       => $errors,
             'state'        => ['step' => 'q_run_complete', 'timestamp' => date('c')]
         ]);

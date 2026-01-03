@@ -164,73 +164,98 @@
   const setState = (s) => { try { localStorage.setItem('state', JSON.stringify(s)); } catch {} };
   const getGlobalState = async () => ({});
   const setGlobalState = async (_)=>{};
+// -------------------- QID: prefer ?qid query string --------------------
+function currentQID() {
+  const state = getState();
 
-  // -------------------- QID: always from window title --------------------
-  function currentQID() {
-    if (typeof window.qid !== 'undefined') {
-      window.document.title = window.qid;
+  // ---------------------------------------------
+  // 0. CHECK QUERY STRING FOR ?qid (length > 4)
+  // ---------------------------------------------
+  const search = String(window.location.search || '');
+  const queryParams = new URLSearchParams(search);
+  const qidParam = queryParams.get('qid');
 
-      return qid;
-    }
-    const raw = String(document.title || '').trim();
-    const low = raw.toLowerCase();
-    let state = getState();
+  if (typeof qidParam === 'string' && qidParam.trim().length > 4) {
+    const normalized = qidParam.trim();
+
+    window.qid = normalized;
+    window.document.title = normalized;
 
     if (state.debug) {
-      console.log('[Q] currentQID check', low);
+      console.log('[Q] QID from query string →', normalized);
     }
 
-    // ---------------------------------------------
-    // 1. CHECK HASH FOR #Q_WRITE or #Q_MANIFEST
-    // ---------------------------------------------
-    const hash = String(window.location.hash || '').trim();   // e.g. "#Q_WRITE=abc|extra"
-    const upperHash = hash.toUpperCase();
+    return normalized;
+  }
 
-    let extractedQID = null;
+  // ---------------------------------------------
+  // 1. EXISTING GLOBAL QID
+  // ---------------------------------------------
+  if (typeof window.qid === 'string' && window.qid.length > 4) {
+    window.document.title = window.qid;
+    return window.qid;
+  }
 
-    if (upperHash.startsWith('#Q_WRITE=') || upperHash.startsWith('#Q_MANIFEST=')) {
-      // remove "#"
-      const clean = hash.substring(1);             // e.g. "Q_WRITE=abc|123"
-      const parts = clean.split('=');              // ["Q_WRITE", "abc|123"]
+  const rawTitle = String(document.title || '').trim();
+  const lowTitle = rawTitle.toLowerCase();
 
-      if (parts.length === 2) {
-        const payload = parts[1];                  // "abc|123"
-        const pipeSplit = payload.split('|');      // ["abc", "123"]
-        const first = (pipeSplit[0] || '').trim(); // "abc"
+  if (state.debug) {
+    console.log('[Q] currentQID fallback check', lowTitle);
+  }
 
-        if (first.toLowerCase().startsWith('q_')) {
-          extractedQID = first.toLowerCase();
-          if (state.debug) {
-            console.log('[Q] extracted QID from hash →', extractedQID);
-          }
+  // ---------------------------------------------
+  // 2. CHECK HASH FOR #Q_WRITE or #Q_MANIFEST
+  // ---------------------------------------------
+  const hash = String(window.location.hash || '').trim();
+  const upperHash = hash.toUpperCase();
+
+  let extractedQID = null;
+
+  if (upperHash.startsWith('#Q_WRITE=') || upperHash.startsWith('#Q_MANIFEST=')) {
+    const clean = hash.substring(1);        // remove #
+    const parts = clean.split('=');
+
+    if (parts.length === 2) {
+      const payload = parts[1];
+      const first = (payload.split('|')[0] || '').trim();
+
+      if (first.toLowerCase().startsWith('q_') && first.length > 4) {
+        extractedQID = first.toLowerCase();
+
+        if (state.debug) {
+          console.log('[Q] extracted QID from hash →', extractedQID);
         }
       }
     }
-
-    if (extractedQID) {
-      window.qid = extractedQID;
-      return extractedQID;
-    }
-
-    // ---------------------------------------------
-    // 2. FALLBACK: USE window.title if it starts with q_
-    // ---------------------------------------------
-    if (low.startsWith('q_')) {
-      window.qid = low;
-      return low;
-    }
-
-    // ---------------------------------------------
-    // 3. FINAL RESORT DEFAULT
-    // ---------------------------------------------
-    console.warn(
-      '🟨 [Q] QCoreQueueClient.js Missing/invalid QID in window.title and hash; defaulting to q_status_1 — title:',
-      raw
-    );
-
-    window.document.title = 'q_status_1';
-    return 'q_status_1';
   }
+
+  if (extractedQID) {
+    window.qid = extractedQID;
+    window.document.title = extractedQID;
+    return extractedQID;
+  }
+
+  // ---------------------------------------------
+  // 3. FALLBACK: WINDOW TITLE
+  // ---------------------------------------------
+  if (lowTitle.startsWith('q_') && lowTitle.length > 4) {
+    window.qid = lowTitle;
+    return lowTitle;
+  }
+
+  // ---------------------------------------------
+  // 4. FINAL DEFAULT
+  // ---------------------------------------------
+  console.warn(
+    '[Q] Missing/invalid QID in query, hash, and title; defaulting to q_status_1 — title:',
+    rawTitle
+  );
+
+  window.qid = 'q_status_1';
+  window.document.title = 'q_status_1';
+  return 'q_status_1';
+}
+
 
 
   // -------------------- Helpers --------------------
