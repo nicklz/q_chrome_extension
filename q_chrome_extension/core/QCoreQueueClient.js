@@ -478,7 +478,7 @@ function currentQID() {
               const _path = normalizeSandboxPath(it.filepath || `/tmp/${_qid}.txt`);
               await QNewTab(_qid, _path, String(it.content ?? ''));
             }));
-            if (i + batchSize < items.length) await delay(90000);
+            if (i + batchSize < items.length) await delay(15000);
           }
           if (window.QCoreStatusLoop && typeof window.QCoreStatusLoop.generateQ === 'function') {
             state = await window.QCoreStatusLoop.generateQ(state);

@@ -881,13 +881,13 @@
                   console.log('manifest loop', 8);
                   if (i + batchSize < state.response.length) {
                     console.log('⏱️ Waiting 90 seconds before next batch...');
-                    await delay(90000);
+                    await delay(15000);
                   }
                 }
 
                 await wait(100000);
                 console.log('manifest loop', 9);
-                state = await generateQ(state);
+                // state = await generateQ(state);
                 console.log('manifest loop', [10,state]);
                 state.run_count++;
               } else {
