@@ -269,9 +269,11 @@
           // ----- main action -----
           state.prompt = '';
 
-          if (state.manifest) {
-            state.prompt = `RULE: AVOID USING NON ALPHA NUMERIC NUMBERS DO NOT set 'content' to JSON OR STRUCTURED DATA ONLY A STRING. VIBE PSUEDO CODE EVERYTHING BASICALLY BUT VERY PROFESSIONALLY LIKE A MAINTAINER FOR THE DOCUMENTATION LEVEL BY EXPLAINING IN ENGLISH. MAKE SURE THOUGH TO STATE FUNCTION NAMES AND VARIABLE NAMES IN FULL. THEY DONT USE SPECIAL CHARACTERS USUALLY. NUMBERS OK. RULE: when generating the qid use q_write_uuid_number as the format so q_write_1234_4   use q_write as the prefix, then just make sure the rest of the string is unique and ++ each time. qid HAS TO START WITH  'q_write_'. OK RETURN THE FOLLOWING JSON IN CODE FORMAT. IT IS AN ARRAY OF ITEMS AND VERY LONG BUT REMEMBER TO USE CODE FORMAT FOR THE JSON. I WANT YOU TO RESPOND WITH AS MANY ITEMS AS YOU CAN AND FOLLOW MY RULES. IF YOU NOTICE WE ARE JUST LOOPING FOREVER REDUNDANTLY END IT ALL BY SENDING AN EMPTY [] ARRAY OF 0 ITEMS BACK. ALSO IF THIS IS MID-PROCESS THEN CONTINUE WHERE YOU LEFT FROM MY LAST PROMPT KEEP GROWING THE LIST. IF THIS IS MY FIRST PROMPT START OVER IF THIS IS A NEW MANIFEST GENERATION THREAD. I WILL LOOP SENDING THIS SO KEEP GOING.  JUST MAKE SURE YOU HAVE EVERY FILE NEEDED LISTED. DO NOT USE FAAS GENERATE THE FULL FILE ASKED FROM THIS EXACT PROMPT WITH DOCUMENTATION AT THE HEADER OF THIS PROMPT IN ITS ENTIRETY WITH EACH FUNCTION OR METHOD FULLY FILLED OUT AND ANY RELATED FILES. AT THE TOP ALSO IS USAGE OF THIS FILE AND ITS FILETYPE AND LANGUAGE AND AUTHORING INFORMATION FROM Q USE CURRENT VERSION FROM MEMORY AT ALL TIMES.: ${state.prompt} ${state.qPrompt} General Requirements & Project Structure:
+          if (!state.manifest && !state.qPromptSingleFileWrite) {
+            state.prompt = `RULE: AVOID USING NON ALPHA NUMERIC NUMBERS DO NOT set 'content' to JSON OR STRUCTURED DATA ONLY A STRING.  IT IS AN ARRAY OF ITEMS AND VERY LONG BUT REMEMBER TO USE CODE FORMAT FOR THE JSON. I WANT YOU TO RESPOND WITH AS MANY ITEMS AS YOU CAN AND FOLLOW MY RULES. IF YOU NOTICE WE ARE JUST LOOPING FOREVER REDUNDANTLY END IT ALL BY SENDING AN EMPTY [] ARRAY OF 0 ITEMS BACK. ALSO IF THIS IS MID-PROCESS THEN CONTINUE WHERE YOU LEFT FROM MY LAST PROMPT KEEP GROWING THE LIST. IF THIS IS MY FIRST PROMPT START OVER IF THIS IS A NEW MANIFEST GENERATION THREAD. I WILL LOOP SENDING THIS SO KEEP GOING.  JUST MAKE SURE YOU HAVE EVERY FILE NEEDED LISTED. DO NOT USE FAAS GENERATE THE FULL FILE ASKED FROM THIS EXACT PROMPT WITH DOCUMENTATION AT THE HEADER OF THIS PROMPT IN ITS ENTIRETY WITH EACH FUNCTION OR METHOD FULLY FILLED OUT AND ANY RELATED FILES. AT THE TOP ALSO IS USAGE OF THIS FILE AND ITS FILETYPE AND LANGUAGE AND AUTHORING INFORMATION FROM Q USE CURRENT VERSION FROM MEMORY AT ALL TIMES.: ${state.prompt} ${state.qPrompt} General Requirements & Project Structure:
 
+
+                            RETURN THE JSON FO A QID FORMAT qid increment from ${qid} and replace q_manifest with q_write unless its a bash q_command needed , filepath (string full pwd path with sandbox in the path), content (string)
                             WHEN YOU GENERATE THE README cover the list of commands for makefile and at top of readme try and re-sell the idea of the app from the original business proposal that was given to you, the original ticket, this is a marketing guys job so go full sales pitch on the idea a few paragraphs OK DO THIS WHEN GENERATING THE README + EXPAND UPON IT MARKDOWN FILE
 
 
@@ -465,8 +467,9 @@
                             Ensure all frontend and backend code is covered with unit tests, integration tests, and E2E tests. This will increase stability and reduce the likelihood of issues in production.`;
           }
           else {
+            console.log("STATE LOOK FOR MANIFEST", state)
             if (!state.debug) {
-              state.prompt = `THIS IS A Q_WRITE COMMAND MEANING YOU ARE TO FULLY AND THOROUGHLY GENERATE THE FILE BASED OFF THIS TEXT: ${state.prompt} ${state.qPrompt} GENERATE AS MUCH CODE WITH A FULL HEADER AND WRITE THE THIS VALUE IN HEADER: "doc title' ${document.title} AND 'qid of file' ${qid} WRITE ALL THE METHODS IN THE HEADER THAT YOU WILL WRITE IN THE FILE. WRITE ALL RELATED FILES IN THE HEADER BEFORE ANY INCLUDES. TRY TO AVOID INCLUDES AND USE AN INTERNAL STATE TO CONTROL EVERYTHING. WRITE THE CODE IN WHAT THE FILEPATH EXTENSION IS SO JS OR PHP OR JSON OR WRITE THE CODE TO THE PROPER FILE TYPE. GENERATE CORRECT QID FORMAT DO NOT JUST GIVE ME q_status_1 GENERATE IT UNIQUE IN THE Q_TYPE_HASH_NUMBER FORMAT THESE ARE MOSTYPE WRITE TYPES UNLESS COMMANDS ARE NEEDED TO STARTUP. WE NOW HAVE THE QID PREPROCESSED TAKE THE QID AND CHANGE MANIFEST TO WRITE AND INCREMENT THE 01++ AFTER FOR ALL NEW ITEMS KEEP INCREMENTING KEEP THE HASH FROM THE QID so q_write_hash_0N++ IS WHAT YOURE USING FOR THESE QID YOU GENERATE NOW IN THIS LIST
+              state.prompt = `${qid} THIS IS A Q_WRITE COMMAND [CHATGPT NAME THIS THREAD THE QID OF THIS PROCESS which read later is q_write_hash_0N++ where hash is the hash and N is the number ++ read this later token balance] MEANING YOU ARE TO FULLY AND THOROUGHLY GENERATE THE FILE BASED OFF THIS TEXT: ${state.prompt} ${state.qPrompt} GENERATE AS MUCH CODE WITH A FULL HEADER AND WRITE THE THIS VALUE IN HEADER: "doc title' ${document.title} AND 'qid of file' ${qid} WRITE ALL THE METHODS IN THE HEADER THAT YOU WILL WRITE IN THE FILE. WRITE ALL RELATED FILES IN THE HEADER BEFORE ANY INCLUDES. TRY TO AVOID INCLUDES AND USE AN INTERNAL STATE TO CONTROL EVERYTHING. WRITE THE CODE IN WHAT THE FILEPATH EXTENSION IS SO JS OR PHP OR JSON OR WRITE THE CODE TO THE PROPER FILE TYPE. GENERATE CORRECT QID FORMAT DO NOT JUST GIVE ME q_status_1 GENERATE IT UNIQUE IN THE Q_TYPE_HASH_NUMBER FORMAT THESE ARE MOSTYPE WRITE TYPES UNLESS COMMANDS ARE NEEDED TO STARTUP. WE NOW HAVE THE QID PREPROCESSED TAKE THE QID AND CHANGE MANIFEST TO WRITE AND INCREMENT THE 01++ AFTER FOR ALL NEW ITEMS KEEP INCREMENTING KEEP THE HASH FROM THE QID so q_write_hash_0N++ IS WHAT YOURE USING FOR THESE QID YOU GENERATE NOW IN THIS LIST. THE 'content' value is always a flat string never structured data
        
 
 
@@ -474,239 +477,239 @@
 
 
 
+              START EVERY FILE WITH THIS FILE [Q] COMPRESSION HEADER
+              /* =================================================================================================
+              [Q] COMPRESSION HEADER (QC-HEADER)
+              Standardized Middle-Out Compression Spec
+              Version: 0.2
+              
+              ---------------------------------------------------------------------------------------------------
+              PROJECT METADATA (MANDATORY – TOP OF FILE)
+              ---------------------------------------------------------------------------------------------------
+              FullFilePathPWD     <string>
+              FileName:           <string>
+              QID:                <string required from input generated / value must be maintained and carried over from prompt>
+              ProjectName:        <string>
+              Author:             <string>
+              Date:               <YYYY-MM-DD>
+              ContentType:        <code | book | json | database | logs | mixed>
+              PrimaryLanguage:    <e.g., JavaScript | English | JSON | SQL | Mixed>
+              FrameworkOrSchema: <e.g., React | Express | MySQL | Custom | None>
+              Purpose:            <What this compressed header represents and how it should be used>
+              
+              ---------------------------------------------------------------------------------------------------
+              SPECIFICATION METADATA
+              ---------------------------------------------------------------------------------------------------
+              SpecName:           Q_COMPRESSION
+              SpecVersion:        0.2
+              MaxSourceSize:      25MB (approximate)
+              TargetHeaderSize:   100KB (tokens)
+              CompressionModel:  Middle-Out, Iterative, Deterministic
+              RehydrationGoal:   Deterministic reconstruction OR invariant-preserving regeneration
+              
+              ---------------------------------------------------------------------------------------------------
+              0) CORE INTENT
+              ---------------------------------------------------------------------------------------------------
+              This header is a **compressed semantic representation** of a much larger corpus.
+              
+              The header must:
+              - Represent up to ~25MB of source material
+              - Fit within ~100KB of tokens
+              - Preserve meaning, structure, intent, and navigability
+              - Allow reconstruction OR equivalent regeneration
+              
+              The header is authoritative.
+              The body is optional and may be partial, chunked, or omitted.
+              
+              ---------------------------------------------------------------------------------------------------
+              1) SUPPORTED CORPUS TYPES
+              ---------------------------------------------------------------------------------------------------
+              This spec applies equally to:
+              
+              - Logic Code
+                - functions, methods, modules
+              - Narrative Text (Books, Articles, Scripts)
+                - chapters are treated as functions
+              - Structured Data (JSON, YAML)
+                - objects/keys are treated as symbols
+              - Databases (SQL, CSV, large tables)
+                - schemas summarized; rows chunk-sampled and tagged
+              - Logs / Repetitive Datasets
+                - pattern-based summarization only
+              
+              The same compression rules apply; only the interpretation layer differs.
+              
+              ---------------------------------------------------------------------------------------------------
+              2) MIDDLE-OUT COMPRESSION STRATEGY (CANONICAL)
+              ---------------------------------------------------------------------------------------------------
+              Compression is performed **iteratively**, not in one pass.
+              
+              Allowed operations:
+              - Chunk sampling (do NOT read entire massive datasets)
+              - Frequency analysis
+              - Phrase / structure factoring
+              - Rule-based regeneration
+              - Semantic summarization
+              
+              Forbidden operations:
+              - Silent data loss
+              - Unlogged edits
+              - Reordering without invariant declaration
+              
+              ---------------------------------------------------------------------------------------------------
+              3) DATA HANDLING RULES BY CONTENT TYPE
+              ---------------------------------------------------------------------------------------------------
+              
+              3.1 Narrative / Book Content
+              - Chapters are treated as FUNCTIONS
+              - Each chapter MUST have:
+                - A short summary (≤4 lines)
+                - Placed immediately ABOVE the chapter text
+              - The summary functions as the “function comment”
+              - Full chapter text MAY remain, be chunked, or be referenced externally
+              
+              3.2 JSON / Structured Files
+              - Keys and schema are authoritative
+              - Large arrays must NOT be fully read
+              - Arrays are:
+                - sampled
+                - pattern-tagged
+                - summarized
+              - Repeating structures are replaced by rules
+              
+              3.3 Databases (MySQL / SQL)
+              - Schema is fully preserved
+              - Rows are NEVER fully ingested
+              - Rows are:
+                - chunked
+                - statistically summarized
+                - tagged by semantic meaning
+              - Example:
+                - “users table: ~4.2M rows, repeating pattern, fields X,Y,Z”
+              
+              3.4 Logs / Time-Series Data
+              - No full ingestion
+              - Only:
+                - pattern detection
+                - frequency bands
+                - anomaly tags
+                - time window summaries
+              
+              ---------------------------------------------------------------------------------------------------
+              4) RECONSTRUCTION MODES
+              ---------------------------------------------------------------------------------------------------
+              ReconstructionMode: <Lossless | BehaviorPreserving | NarrativeEquivalent>
+              
+              Lossless:
+              - Byte-accurate reconstruction possible
+              
+              BehaviorPreserving:
+              - Interfaces, schemas, outputs preserved
+              - Formatting may differ
+              
+              NarrativeEquivalent:
+              - Meaning, structure, and intent preserved
+              - Exact wording may differ unless marked canonical
+              
+              ---------------------------------------------------------------------------------------------------
+              5) COMMENT & SUMMARY ENFORCEMENT
+              ---------------------------------------------------------------------------------------------------
+              All primary units MUST have comments:
+              
+              - Code → function header comments
+              - Book → chapter summaries
+              - JSON → object/schema summaries
+              - Database → table summaries
+              
+              These summaries are:
+              - Required
+              - Logged
+              - Mirrored in the index
+              
+              ---------------------------------------------------------------------------------------------------
+              6) FUNCTION / CHAPTER COMMENT INDEX (MANDATORY)
+              ---------------------------------------------------------------------------------------------------
+              This index mirrors **all summaries** used in compression.
+              
+              Format:
+              - UnitId:
+                - Type: <function | chapter | object | table>
+                - Name:
+                - Location:
+                - Summary:
+                - Invariants:
+                - References:
+              
+              This index is used for:
+              - Navigation
+              - Regeneration
+              - Validation
+              - Human audit
+              
+              ---------------------------------------------------------------------------------------------------
+              7) SYMBOL & REWRITE MATRIX
+              ---------------------------------------------------------------------------------------------------
+              Repeated elements are replaced via a layered matrix:
+              
+              Levels:
+              - Level 0: Canonicalization
+              - Level 1: String Symbols
+              - Level 2: Phrase Symbols
+              - Level 3: Structural Chunks
+              - Level 4: Generator Rules
+              - Level 5: Residual Data
+              
+              All mappings MUST be logged.
+              
+              ---------------------------------------------------------------------------------------------------
+              8) PATCH / CHANGE LOGGING (STRICT)
+              ---------------------------------------------------------------------------------------------------
+              Any change requires:
+              - PatchId
+              - Date
+              - Author
+              - Reason
+              - Units affected
+              - Invariants preserved
+              
+              No silent changes.
+              No retroactive edits.
+              
+              ---------------------------------------------------------------------------------------------------
+              9) RELATED FILES / DEPENDENCIES
+              ---------------------------------------------------------------------------------------------------
+              List all related:
+              - Files
+              - Schemas
+              - APIs
+              - External references
+              
+              Explain why each matters.
+              
+              ---------------------------------------------------------------------------------------------------
+              10) VERIFICATION & INVARIANTS
+              ---------------------------------------------------------------------------------------------------
+              Each compressed corpus must declare:
+              - What MUST remain true after reconstruction
+              - What MAY vary
+              - How to validate correctness
+              
+              ---------------------------------------------------------------------------------------------------
+              11) GUARANTEE
+              ---------------------------------------------------------------------------------------------------
+              No critical data is lost.
+              ================================================================================================= 
+              
+              do not be cheap on tokens give full file back wtih this header comments.*/
+
               
 
-
-START EVERY FILE WITH THIS FILE [Q] COMPRESSION HEADER
-/* =================================================================================================
-[Q] COMPRESSION HEADER (QC-HEADER)
-Standardized Middle-Out Compression Spec
-Version: 0.2
-
----------------------------------------------------------------------------------------------------
-PROJECT METADATA (MANDATORY – TOP OF FILE)
----------------------------------------------------------------------------------------------------
-FullFilePathPWD     <string>
-FileName:           <string>
-QID:                <string required from input generated / value must be maintained and carried over from prompt>
-ProjectName:        <string>
-Author:             <string>
-Date:               <YYYY-MM-DD>
-ContentType:        <code | book | json | database | logs | mixed>
-PrimaryLanguage:    <e.g., JavaScript | English | JSON | SQL | Mixed>
-FrameworkOrSchema: <e.g., React | Express | MySQL | Custom | None>
-Purpose:            <What this compressed header represents and how it should be used>
-
----------------------------------------------------------------------------------------------------
-SPECIFICATION METADATA
----------------------------------------------------------------------------------------------------
-SpecName:           Q_COMPRESSION
-SpecVersion:        0.2
-MaxSourceSize:      25MB (approximate)
-TargetHeaderSize:   100KB (tokens)
-CompressionModel:  Middle-Out, Iterative, Deterministic
-RehydrationGoal:   Deterministic reconstruction OR invariant-preserving regeneration
-
----------------------------------------------------------------------------------------------------
-0) CORE INTENT
----------------------------------------------------------------------------------------------------
-This header is a **compressed semantic representation** of a much larger corpus.
-
-The header must:
-- Represent up to ~25MB of source material
-- Fit within ~100KB of tokens
-- Preserve meaning, structure, intent, and navigability
-- Allow reconstruction OR equivalent regeneration
-
-The header is authoritative.
-The body is optional and may be partial, chunked, or omitted.
-
----------------------------------------------------------------------------------------------------
-1) SUPPORTED CORPUS TYPES
----------------------------------------------------------------------------------------------------
-This spec applies equally to:
-
-- Logic Code
-  - functions, methods, modules
-- Narrative Text (Books, Articles, Scripts)
-  - chapters are treated as functions
-- Structured Data (JSON, YAML)
-  - objects/keys are treated as symbols
-- Databases (SQL, CSV, large tables)
-  - schemas summarized; rows chunk-sampled and tagged
-- Logs / Repetitive Datasets
-  - pattern-based summarization only
-
-The same compression rules apply; only the interpretation layer differs.
-
----------------------------------------------------------------------------------------------------
-2) MIDDLE-OUT COMPRESSION STRATEGY (CANONICAL)
----------------------------------------------------------------------------------------------------
-Compression is performed **iteratively**, not in one pass.
-
-Allowed operations:
-- Chunk sampling (do NOT read entire massive datasets)
-- Frequency analysis
-- Phrase / structure factoring
-- Rule-based regeneration
-- Semantic summarization
-
-Forbidden operations:
-- Silent data loss
-- Unlogged edits
-- Reordering without invariant declaration
-
----------------------------------------------------------------------------------------------------
-3) DATA HANDLING RULES BY CONTENT TYPE
----------------------------------------------------------------------------------------------------
-
-3.1 Narrative / Book Content
-- Chapters are treated as FUNCTIONS
-- Each chapter MUST have:
-  - A short summary (≤4 lines)
-  - Placed immediately ABOVE the chapter text
-- The summary functions as the “function comment”
-- Full chapter text MAY remain, be chunked, or be referenced externally
-
-3.2 JSON / Structured Files
-- Keys and schema are authoritative
-- Large arrays must NOT be fully read
-- Arrays are:
-  - sampled
-  - pattern-tagged
-  - summarized
-- Repeating structures are replaced by rules
-
-3.3 Databases (MySQL / SQL)
-- Schema is fully preserved
-- Rows are NEVER fully ingested
-- Rows are:
-  - chunked
-  - statistically summarized
-  - tagged by semantic meaning
-- Example:
-  - “users table: ~4.2M rows, repeating pattern, fields X,Y,Z”
-
-3.4 Logs / Time-Series Data
-- No full ingestion
-- Only:
-  - pattern detection
-  - frequency bands
-  - anomaly tags
-  - time window summaries
-
----------------------------------------------------------------------------------------------------
-4) RECONSTRUCTION MODES
----------------------------------------------------------------------------------------------------
-ReconstructionMode: <Lossless | BehaviorPreserving | NarrativeEquivalent>
-
-Lossless:
-- Byte-accurate reconstruction possible
-
-BehaviorPreserving:
-- Interfaces, schemas, outputs preserved
-- Formatting may differ
-
-NarrativeEquivalent:
-- Meaning, structure, and intent preserved
-- Exact wording may differ unless marked canonical
-
----------------------------------------------------------------------------------------------------
-5) COMMENT & SUMMARY ENFORCEMENT
----------------------------------------------------------------------------------------------------
-All primary units MUST have comments:
-
-- Code → function header comments
-- Book → chapter summaries
-- JSON → object/schema summaries
-- Database → table summaries
-
-These summaries are:
-- Required
-- Logged
-- Mirrored in the index
-
----------------------------------------------------------------------------------------------------
-6) FUNCTION / CHAPTER COMMENT INDEX (MANDATORY)
----------------------------------------------------------------------------------------------------
-This index mirrors **all summaries** used in compression.
-
-Format:
-- UnitId:
-  - Type: <function | chapter | object | table>
-  - Name:
-  - Location:
-  - Summary:
-  - Invariants:
-  - References:
-
-This index is used for:
-- Navigation
-- Regeneration
-- Validation
-- Human audit
-
----------------------------------------------------------------------------------------------------
-7) SYMBOL & REWRITE MATRIX
----------------------------------------------------------------------------------------------------
-Repeated elements are replaced via a layered matrix:
-
-Levels:
-- Level 0: Canonicalization
-- Level 1: String Symbols
-- Level 2: Phrase Symbols
-- Level 3: Structural Chunks
-- Level 4: Generator Rules
-- Level 5: Residual Data
-
-All mappings MUST be logged.
-
----------------------------------------------------------------------------------------------------
-8) PATCH / CHANGE LOGGING (STRICT)
----------------------------------------------------------------------------------------------------
-Any change requires:
-- PatchId
-- Date
-- Author
-- Reason
-- Units affected
-- Invariants preserved
-
-No silent changes.
-No retroactive edits.
-
----------------------------------------------------------------------------------------------------
-9) RELATED FILES / DEPENDENCIES
----------------------------------------------------------------------------------------------------
-List all related:
-- Files
-- Schemas
-- APIs
-- External references
-
-Explain why each matters.
-
----------------------------------------------------------------------------------------------------
-10) VERIFICATION & INVARIANTS
----------------------------------------------------------------------------------------------------
-Each compressed corpus must declare:
-- What MUST remain true after reconstruction
-- What MAY vary
-- How to validate correctness
-
----------------------------------------------------------------------------------------------------
-11) GUARANTEE
----------------------------------------------------------------------------------------------------
-No critical data is lost.
-================================================================================================= 
-
-do not be cheap on tokens give full file back wtih this header comments.*/
 
               
               `;
             }
             else {
-              state.prompt = `THIS IS A Q_WRITE COMMAND MEANING YOU ARE TO IN DEBUG MODE SO WRITE A VERY BRIEF FILE: ${state.prompt} ${state.qPrompt} make sure to include QID in header but thats it.`;
+              state.prompt = `THIS IS A Q_WRITE COMMAND [CHATGPT NAME THIS THREAD THE QID OF THIS PROCESS] MEANING YOU ARE TO IN DEBUG MODE SO WRITE A VERY BRIEF FILE: ${state.prompt} ${state.qPrompt} make sure to include QID in header but thats it.`;
             }
             
             
@@ -1009,6 +1012,12 @@ do not be cheap on tokens give full file back wtih this header comments.*/
       state.qPromptSingleFileWrite = 1;
     }
 
+    if (params.has('Q_WRITE')) {
+      state.qPromptSingleFileWrite = 1;
+      state.qPrompt = params.get('Q_WRITE');
+    }
+
+
     if (state.debug) {
       console.log('Q_MANIFEST PARAM $state', state);
     }
@@ -1142,19 +1151,21 @@ do not be cheap on tokens give full file back wtih this header comments.*/
               // const stateResult = await window?.QCoreQueueClient?.window?.QCoreQueueClient?.QNewTab(qid, filepath, state.response, state);
                console.log('HERE100⚠️ writeResult', { writeResult });
               // FINDME
-              setTimeout(() => {
-                let n = 3;
-                let i = setInterval(() => {
-                  console.log(`window closing... ${n} 🔥`);
-                  n--;
-                  if (n === 0) {
-                    clearInterval(i);
-                    console.log("closing now 💀💀💀💀💀💀💀💀💀💀💀💀💀💀💀💀💀💀💀💀💀💀💀💀💀💀💀💀💀💀💀💀💀💀💀💀💀💀💀💀💀💀💀💀💀");
+              // setTimeout(() => {
+              //   let n = 3;
+              //   let i = setInterval(() => {
+              //     console.log(`window closing... ${n} 🔥`);
+              //     n--;
+              //     if (n === 0) {
+              //       clearInterval(i);
+              //       console.log("closing now 💀💀💀💀💀💀💀💀💀💀💀💀💀💀💀💀💀💀💀💀💀💀💀💀💀💀💀💀💀💀💀💀💀💀💀💀💀💀💀💀💀💀💀💀💀");
                     
-                    window.close();
-                  }
-                }, 1000);
-              }, 3000);
+              //       window.close();
+              //     }
+              //   }, 1000);
+              // }, 30000);
+
+              window.close();
               
             }
           } else {
