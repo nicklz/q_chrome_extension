@@ -2,6 +2,14 @@
 Q CHROME EXTENSION – LOCAL AUTOMATION FRAMEWORK
 =============================================
 
+
+QUICK START 
+-----------
+
+Install chrome extension, locate the directory and run:
+
+- make install && make up
+
 OVERVIEW
 --------
 The [Q] Chrome Extension is a local-first automation framework that connects browser interaction, terminal execution, and structured AI-driven file mutation entirely on your own machine.
@@ -15,15 +23,7 @@ The local repo is the engine.
 
 
 
-QUICK START 
 
---------------------------------
-
-This installs the local automation engine.
-
-From INSIDE the installed directory:
-
-- make install && make up
 
 
 
