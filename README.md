@@ -1,85 +1,89 @@
 
-[Q] CHROME EXTENSION – LOCAL AUTOMATION FRAMEWORK
-https://nexus-platforms.com
-============================================================
+Q CHROME EXTENSION – LOCAL AUTOMATION FRAMEWORK
+=============================================
 
 OVERVIEW
 --------
-The [Q] Chrome Extension is a local-first automation framework designed to connect browser interaction, terminal command execution, and AI-assisted file mutation inside a developer’s own machine. Nothing runs remotely. Nothing executes without visibility. Every action is auditable, deterministic, and reviewable.
+The Q Chrome Extension is a local-first automation framework that connects browser interaction, terminal execution, and structured AI-driven file mutation entirely on your own machine.
 
-This system is designed for:
-- Local automation
-- Iterative application development
-- Controlled AI-assisted refactors
-- Transparent, inspectable workflows
+Nothing runs remotely.
+Nothing executes without visibility.
+Everything is auditable via git.
 
-The extension is open source for transparency. Chrome Web Store publication is planned, but until then it is installed manually in developer mode.
-
-
-WHAT THIS IS (AND IS NOT)
--------------------------
-- This is NOT a cloud service
-- This is NOT a SaaS automation bot
-- This is NOT remote execution
-- This IS a local automation controller
-- This IS a structured, auditable system
-- This IS designed for developers who want full control
+The Chrome extension is the control surface.
+The local repo is the engine.
 
 
-ABSOLUTE PREREQUISITES (DO NOT SKIP)
+
+QUICK START 
+
+--------------------------------
+
+This installs the local automation engine.
+
+From INSIDE the installed directory:
+
+- make install && make up
+
+
+
+
+PREREQUISITES 
 -----------------------------------
 
-1. YOU MUST HAVE GIT INSTALLED
-   If git is not installed, nothing works.
+These are intentionally basic. If these are missing, stop.
 
-   Verify:
-     git --version
+1. Git MUST be installed
 
-   If missing:
+Verify:
+  git --version
 
-   macOS:
-     https://git-scm.com/download/mac
+Install:
 
-   Linux:
-     https://git-scm.com/book/en/v2/Getting-Started-Installing-Git
+macOS:
+  https://git-scm.com/download/mac
 
-   Windows (WSL2):
-     https://learn.microsoft.com/en-us/windows/wsl/install
+Linux:
+  https://git-scm.com/book/en/v2/Getting-Started-Installing-Git
 
-
-2. YOU MUST HAVE A LOCAL COPY OF THE REPOSITORY
-   This repository must exist locally on disk.
-   Either:
-   - Cloned with git
-   - OR downloaded as a ZIP and extracted
-
-   This directory MUST remain on your machine.
-   The Chrome extension will reference it locally.
+Windows (WSL2):
+  https://learn.microsoft.com/en-us/windows/wsl/install
 
 
-3. YOU MUST INSTALL THE CHROME EXTENSION IN DEVELOPER MODE
-   This is not optional.
+2. You MUST have a local checkout of this repository
 
-   Official Chrome instructions:
-   https://support.google.com/chrome_webstore/answer/2664769?hl=en
+Either:
+- Clone via git
+- OR download ZIP and extract
+
+This directory MUST live on your local filesystem.
+The Chrome extension points at it directly.
 
 
-MACOS SETUP (CLEAN MACHINE)
---------------------------
+3. Chrome MUST allow developer extensions
+
+Official Chrome instructions:
+https://support.google.com/chrome_webstore/answer/2664769?hl=en
+
+
+MACOS SETUP
+----------------------
 
 1. Install Homebrew:
    https://brew.sh
 
-2. Install git and make:
+2. Install required tools:
    brew install git make
 
 3. Verify:
    git --version
    make --version
 
-4. Clone or download the repository into a stable directory:
-   Example:
-     ~/projects/q-extension
+4. Download or clone the repo:
+   git clone <REPO_URL>
+
+5. Change into the repo directory:
+   cd <repo-directory>
 
 
 WINDOWS + WSL2 SETUP
@@ -90,114 +94,131 @@ WINDOWS + WSL2 SETUP
 
 2. Install Ubuntu from Microsoft Store
 
-3. Inside WSL:
+3. Open Ubuntu (WSL terminal)
+
+4. Install tools:
    sudo apt update && sudo apt upgrade -y
    sudo apt install -y git make
 
-4. Verify:
+5. Verify:
    git --version
    make --version
 
-5. Clone or extract the repository inside WSL filesystem
+6. Clone or extract the repo inside WSL:
+   git clone <REPO_URL>
+
+7. Change into the repo directory:
+   cd <repo-directory>
 
 
-CHROME EXTENSION INSTALLATION
------------------------------
+CHROME EXTENSION INSTALL
+-----------------------------------
+
+This installs the UI control surface.
 
 1. Open Chrome
-2. Navigate to:
+2. Go to:
    chrome://extensions
 3. Enable "Developer mode" (top-right)
 4. Click "Load unpacked"
-5. Select the extension directory inside the repository
-6. Confirm extension appears and is enabled
+5. Select the Chrome extension folder from the repo
+6. Confirm the extension is enabled
+
+LOCAL INSTALLATION 
+
+--------------------------------
+
+This installs the local automation engine.
+
+From INSIDE the repository directory:
+
+1. Install everything:
+   make install
+
+What this does:
+- Creates .env from example
+- Installs system packages
+- Installs Node + Python deps
+- Builds Python virtual environment
+- Initializes local memory files
+
+2. Start the system:
+   make up
+
+What this does:
+- Validates environment
+- Clears conflicting ports
+- Starts local services
+- Brings the automation engine online
 
 
-THE QID SYSTEM (CORE CONCEPT)
------------------------------
 
-All automation in this system is driven by QID objects.
+STOP / RESTART
+--------------
 
-A QID object is a structured JSON definition that describes:
-- A file
-- Its role
-- Its full contents
-- Its intent
-- Its guarantees
+Stop:
+  make down
 
-QID objects are NOT commands.
-They are declarations.
-
-Example structure (conceptual):
-
-{
-  "qid": "q_file_xxxx_1",
-  "filepath": "src/example.js",
-  "content": "FULL FILE CONTENT WITH HEADER"
-}
-
-Rules:
-- Every file is fully declared
-- No partial context
-- No blind writes
-- Every change is inspectable
-- Every mutation is reversible via git
+Restart:
+  make restart
 
 
-NO FAAS
--------
-This system no longer exposes or documents FAAS.
+THE QID SYSTEM (ONLY SYSTEM THAT MATTERS)
+-----------------------------------------
 
-Only the QID system is used.
+All automation is defined through QID objects.
 
-QID is the canonical, authoritative format.
-All automation is driven by QID-defined state, files, and transitions.
+A QID object:
+- Fully declares a file
+- Includes full contents
+- Includes role, context, guarantees
+- Is auditable and diffable
+
+There are NO blind edits.
+There are NO partial writes.
+Git diff is mandatory.
+
+FAAS IS NOT USED.
+ONLY QID.
 
 
-HOW AUTOMATION FLOWS (HIGH LEVEL)
----------------------------------
+AUTOMATION FLOW (REAL WORLD)
+----------------------------
 
 qinterest.me
-   ↓
+   feeds
 runitby.com
-   ↓
+   feeds
 ChatGPT
-   ↓
+   feeds
 Q Chrome Extension
-   ↓
-Local filesystem + terminal
-   ↓
-Git diff review
-   ↓
-Human approval
+   drives
+Local repo + terminal
+   verified by
+Git diff + human review
 
-Each layer feeds the next.
-Nothing auto-executes.
-Everything is observable.
+The extension orchestrates.
+The repo executes.
+The human approves.
 
 
 SECURITY MODEL
 --------------
-- Local execution only
+- Local-only execution
 - No remote shell
-- No hidden execution
-- Git diff required for every write
-- Human review always possible
-- Zero destructive defaults
+- No auto-exec
+- Git diff required
+- Reversible by design
 
 
-COMING SOON
------------
-- Chrome Web Store listing
-- Signed builds
-- Simplified onboarding
+STATUS
+------
+Chrome Web Store release: coming soon
 
-CURRENT STATUS
---------------
-Public.
-Open source.
-Manual install.
-Transparent by design.
+Current:
+- Public
+- Open source
+- Manual install for transparency
 
 
 FINAL GUARANTEE
