@@ -170,3 +170,173 @@ Current:
 ## ✅ Final Guarantee
 
 **No critical data is lost.**
+
+---
+
+## ❓ FAQ — Common Questions & Fixes
+
+### 1️⃣ How do I install a downloaded ZIP as a Chrome extension?
+1. Unzip the downloaded file
+2. Open Chrome and go to `chrome://extensions`
+3. Enable **Developer mode** (top-right)
+4. Click **Load unpacked**
+5. Select the **unzipped extension folder**
+6. Confirm the extension is enabled ✅
+
+---
+
+### 2️⃣ Chrome says “Manifest file missing or unreadable” — what’s wrong?
+You selected the wrong folder.  
+Make sure the folder contains `manifest.json` at its root.
+
+---
+
+### 3️⃣ Can I install the extension directly from WSL?
+❌ No. Chrome extensions must be loaded from the **Windows or macOS filesystem**, not the Linux filesystem inside WSL.
+
+Recommended:
+- Keep the extension folder on Windows/macOS
+- Keep the automation repo inside WSL
+
+---
+
+### 4️⃣ Where should the repo live when using WSL2?
+Inside WSL’s Linux filesystem:
+```
+/home/<user>/q/
+```
+Avoid `/mnt/c` for performance and file watcher stability.
+
+---
+
+### 5️⃣ Git is not found — how do I fix this?
+Install Git:
+
+Ubuntu / WSL:
+```
+sudo apt install -y git
+```
+
+macOS:
+```
+brew install git
+```
+
+---
+
+### 6️⃣ Homebrew isn’t installed on macOS — what’s the fastest way?
+```
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+```
+
+Restart your terminal after install.
+
+---
+
+### 7️⃣ Should I install Homebrew inside WSL?
+❌ No. Homebrew is **macOS-only**.  
+Use `apt` inside WSL instead.
+
+---
+
+### 8️⃣ `make` is missing — how do I install it?
+Ubuntu / WSL:
+```
+sudo apt install -y make
+```
+
+macOS:
+```
+brew install make
+```
+
+---
+
+### 9️⃣ `make install` fails — what should I check first?
+- Git installed
+- Make installed
+- Correct directory
+- No permission errors
+- `.env.example` exists
+
+---
+
+### 🔟 Ports are already in use — what do I do?
+Stop existing processes:
+```
+make down
+```
+Or kill manually:
+```
+lsof -i :PORT
+kill -9 PID
+```
+
+---
+
+### 1️⃣1️⃣ Can this run without the Chrome extension?
+⚠️ Partially.  
+The repo can run standalone, but **automation orchestration requires the extension**.
+
+---
+
+### 1️⃣2️⃣ Does this execute anything automatically?
+❌ No.  
+Every command is explicit, visible, and reviewable.
+
+---
+
+### 1️⃣3️⃣ Is internet access required?
+Only for:
+- Dependency installation
+- Git cloning
+
+All execution is local.
+
+---
+
+### 1️⃣4️⃣ Where are automation state and memory stored?
+Inside the repository:
+- `.q/`
+- `.state/`
+- Local JSON + logs
+
+---
+
+### 1️⃣5️⃣ Can I undo changes?
+✅ Yes.
+All changes are Git-diffed and reversible.
+
+---
+
+### 1️⃣6️⃣ Is Windows (non‑WSL) supported?
+❌ No.  
+WSL2 is required for Linux parity and tooling.
+
+---
+
+### 1️⃣7️⃣ Node or Python version errors?
+Use system defaults first.  
+Avoid `nvm` or `pyenv` until stable.
+
+---
+
+### 1️⃣8️⃣ Why not Docker?
+Docker hides file mutations and diffs.  
+Q requires **transparent filesystem access**.
+
+---
+
+### 1️⃣9️⃣ Is any data sent to remote servers?
+❌ No.  
+No telemetry. No remote shell. No background sync.
+
+---
+
+### 2️⃣0️⃣ What happens if something breaks?
+- Execution halts
+- State is preserved
+- Git diff shows exactly what changed
+- No critical data is lost
+
+---
