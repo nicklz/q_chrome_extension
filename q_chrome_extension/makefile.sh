@@ -138,7 +138,39 @@ ensure_php_memcache_modules_linux() {
 }
 
 install() {
-  log "Installing [Q]..."
+  log "Installing [Q] prerequisites..."
+
+  is_macos || return 0
+
+  # Xcode Command Line Tools (required for git, gcc, etc.)
+  if ! xcode-select -p >/dev/null 2>&1; then
+    log "Installing Xcode Command Line Tools..."
+    xcode-select --install
+    until xcode-select -p >/dev/null 2>&1; do sleep 5; done
+  fi
+
+  # Homebrew
+  if ! command -v brew >/dev/null 2>&1; then
+    log "Installing Homebrew..."
+    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+    eval "$(/opt/homebrew/bin/brew shellenv 2>/dev/null || /usr/local/bin/brew shellenv)"
+  fi
+
+  # Git
+  if ! command -v git >/dev/null 2>&1; then
+    log "Installing git..."
+    brew install git
+  fi
+
+  # Common local web dev tools
+  for pkg in node yarn wget jq; do
+    if ! command -v "$pkg" >/dev/null 2>&1; then
+      log "Installing $pkg..."
+      brew install "$pkg"
+    fi
+  done
+
+  log "[Q] prerequisites installed"
 
   rm -f .env || true
 
