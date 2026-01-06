@@ -1127,7 +1127,7 @@
                   console.log('manifest loop', 8);
                   if (i + batchSize < state.response.length) {
                     console.log('⏱️ Waiting 90 seconds before next batch...');
-                    await delay(15000);
+                    await delay(15000 + (state.response.length * 3000 * batchSize * 10));
                   }
                 }
 
