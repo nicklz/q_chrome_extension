@@ -4,7 +4,7 @@ Q CHROME EXTENSION – LOCAL AUTOMATION FRAMEWORK
 
 OVERVIEW
 --------
-The Q Chrome Extension is a local-first automation framework that connects browser interaction, terminal execution, and structured AI-driven file mutation entirely on your own machine.
+The [Q] Chrome Extension is a local-first automation framework that connects browser interaction, terminal execution, and structured AI-driven file mutation entirely on your own machine.
 
 Nothing runs remotely.
 Nothing executes without visibility.
@@ -31,7 +31,6 @@ From INSIDE the installed directory:
 PREREQUISITES 
 -----------------------------------
 
-These are intentionally basic. If these are missing, stop.
 
 1. Git MUST be installed
 
@@ -50,7 +49,7 @@ Windows (WSL2):
   https://learn.microsoft.com/en-us/windows/wsl/install
 
 
-2. You MUST have a local checkout of this repository
+2. You need a copy of this repository
 
 Either:
 - Clone via git
@@ -60,7 +59,7 @@ This directory MUST live on your local filesystem.
 The Chrome extension points at it directly.
 
 
-3. Chrome MUST allow developer extensions
+3. Install Chrome and ensure extensions are enabled
 
 Official Chrome instructions:
 https://support.google.com/chrome_webstore/answer/2664769?hl=en
@@ -163,7 +162,7 @@ Restart:
   make restart
 
 
-THE QID SYSTEM (ONLY SYSTEM THAT MATTERS)
+THE QID SYSTEM
 -----------------------------------------
 
 All automation is defined through QID objects.
@@ -174,15 +173,18 @@ A QID object:
 - Includes role, context, guarantees
 - Is auditable and diffable
 
+- q_type_hash_number
+- q_command_h412_02
+- q_write_a231_12
+
 There are NO blind edits.
 There are NO partial writes.
-Git diff is mandatory.
-
-FAAS IS NOT USED.
-ONLY QID.
 
 
-AUTOMATION FLOW (REAL WORLD)
+
+
+
+AUTOMATION FLOW
 ----------------------------
 
 qinterest.me
