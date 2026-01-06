@@ -1,228 +1,172 @@
+# 🧠⚙️ Q Chrome Extension – Local Automation Framework
 
-Q CHROME EXTENSION – LOCAL AUTOMATION FRAMEWORK
-=============================================
+## 🚀 Quick Start
 
+1. Install the Chrome extension (manual install).
+2. Locate the repository on your local machine.
+3. Run:
 
-QUICK START 
------------
+```
+make install && make up
+```
 
-Install chrome extension, locate the directory and run:
+---
 
-- make install && make up
+## 🧩 Overview
 
-OVERVIEW
---------
-The [Q] Chrome Extension is a local-first automation framework that connects browser interaction, terminal execution, and structured AI-driven file mutation entirely on your own machine.
+The **Q Chrome Extension** is a **local-first automation framework** that unifies:
 
-Nothing runs remotely.
-Nothing executes without visibility.
-Everything is auditable via git.
+- 🌐 Browser interaction  
+- 🖥 Terminal command execution  
+- 🧠 Structured, AI-driven file mutation  
 
-The Chrome extension is the control surface.
-The local repo is the engine.
+All execution happens **entirely on your machine**.
 
+- ❌ Nothing runs remotely  
+- 👁 Nothing executes without visibility  
+- 🔍 Every change is auditable via Git  
 
+The Chrome extension is the **control surface**.  
+The local repository is the **execution engine**.
 
+---
 
+## 🧱 Prerequisites
 
-
-
-
-PREREQUISITES 
------------------------------------
-
-
-1. Git MUST be installed
+### 1️⃣ Git (Required)
 
 Verify:
-  git --version
+```
+git --version
+```
 
 Install:
+- macOS: https://git-scm.com/download/mac  
+- Linux: https://git-scm.com/book/en/v2/Getting-Started-Installing-Git  
+- Windows (WSL2): https://learn.microsoft.com/en-us/windows/wsl/install  
 
-macOS:
-  https://git-scm.com/download/mac
+---
 
-Linux:
-  https://git-scm.com/book/en/v2/Getting-Started-Installing-Git
+### 2️⃣ Local Repository
 
-Windows (WSL2):
-  https://learn.microsoft.com/en-us/windows/wsl/install
+You must have a local copy of this repository.
 
+Options:
+- Clone via Git  
+- Download ZIP and extract  
 
-2. You need a copy of this repository
+⚠️ The repository **must live locally**.  
+The Chrome extension points to it directly.
 
-Either:
-- Clone via git
-- OR download ZIP and extract
+---
 
-This directory MUST live on your local filesystem.
-The Chrome extension points at it directly.
+### 3️⃣ Google Chrome
 
+- Chrome installed
+- Extensions enabled
 
-3. Install Chrome and ensure extensions are enabled
+https://support.google.com/chrome_webstore/answer/2664769
 
-Official Chrome instructions:
-https://support.google.com/chrome_webstore/answer/2664769?hl=en
+---
 
+## 🍎 macOS Setup
 
-MACOS SETUP
-----------------------
+```
+brew install git make
+git clone <REPO_URL>
+cd <repo-directory>
+```
 
-1. Install Homebrew:
-   https://brew.sh
+---
 
-2. Install required tools:
-   brew install git make
+## 🪟 Windows + WSL2 Setup
 
-3. Verify:
-   git --version
-   make --version
+```
+sudo apt update && sudo apt upgrade -y
+sudo apt install -y git make
+git clone <REPO_URL>
+cd <repo-directory>
+```
 
-4. Download or clone the repo:
-   git clone <REPO_URL>
+---
 
-5. Change into the repo directory:
-   cd <repo-directory>
+## 🧩 Chrome Extension Install
 
+1. Open Chrome  
+2. Go to `chrome://extensions`  
+3. Enable **Developer mode**  
+4. Click **Load unpacked**  
+5. Select the extension folder  
+6. Confirm enabled  
 
-WINDOWS + WSL2 SETUP
--------------------
+---
 
-1. Install WSL2:
-   https://learn.microsoft.com/en-us/windows/wsl/install
+## ⚙️ Local Installation
 
-2. Install Ubuntu from Microsoft Store
+Install:
+```
+make install
+```
 
-3. Open Ubuntu (WSL terminal)
-
-4. Install tools:
-   sudo apt update && sudo apt upgrade -y
-   sudo apt install -y git make
-
-5. Verify:
-   git --version
-   make --version
-
-6. Clone or extract the repo inside WSL:
-   git clone <REPO_URL>
-
-7. Change into the repo directory:
-   cd <repo-directory>
-
-
-CHROME EXTENSION INSTALL
------------------------------------
-
-This installs the UI control surface.
-
-1. Open Chrome
-2. Go to:
-   chrome://extensions
-3. Enable "Developer mode" (top-right)
-4. Click "Load unpacked"
-5. Select the Chrome extension folder from the repo
-6. Confirm the extension is enabled
-
-LOCAL INSTALLATION 
-
---------------------------------
-
-This installs the local automation engine.
-
-From INSIDE the repository directory:
-
-1. Install everything:
-   make install
-
-What this does:
-- Creates .env from example
-- Installs system packages
-- Installs Node + Python deps
-- Builds Python virtual environment
-- Initializes local memory files
-
-2. Start the system:
-   make up
-
-What this does:
-- Validates environment
-- Clears conflicting ports
-- Starts local services
-- Brings the automation engine online
-
-
-
-STOP / RESTART
---------------
+Start:
+```
+make up
+```
 
 Stop:
-  make down
+```
+make down
+```
 
 Restart:
-  make restart
+```
+make restart
+```
 
+---
 
-THE QID SYSTEM
------------------------------------------
+## 🆔 The QID System
 
-All automation is defined through QID objects.
+All automation is defined using **QID objects**.
 
-A QID object:
 - Fully declares a file
-- Includes full contents
-- Includes role, context, guarantees
-- Is auditable and diffable
+- Contains complete contents
+- Encodes role, context, guarantees
+- Auditable and diffable
 
-- q_type_hash_number
-- q_command_h412_02
-- q_write_a231_12
+No blind edits.  
+No partial writes.  
+No implicit mutation.
 
-There are NO blind edits.
-There are NO partial writes.
+---
 
+## 🔄 Automation Flow
 
+External feeds → ChatGPT → Q Extension → Local Repo → Git Diff → Human Approval
 
+---
 
+## 🔐 Security Model
 
-AUTOMATION FLOW
-----------------------------
-
-qinterest.me
-   feeds
-runitby.com
-   feeds
-ChatGPT
-   feeds
-Q Chrome Extension
-   drives
-Local repo + terminal
-   verified by
-Git diff + human review
-
-The extension orchestrates.
-The repo executes.
-The human approves.
-
-
-SECURITY MODEL
---------------
 - Local-only execution
 - No remote shell
 - No auto-exec
 - Git diff required
-- Reversible by design
+- Fully reversible
 
+---
 
-STATUS
-------
-Chrome Web Store release: coming soon
+## 📦 Status
+
+🛒 Chrome Web Store: *Coming Soon*
 
 Current:
 - Public
 - Open source
 - Manual install for transparency
 
+---
 
-FINAL GUARANTEE
----------------
-No critical data is lost.
+## ✅ Final Guarantee
+
+**No critical data is lost.**
