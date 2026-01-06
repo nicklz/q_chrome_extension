@@ -26,13 +26,15 @@ The **Q Chrome Extension** is a local-first automation framework that bridges br
 
 - [ ] Bash shell or compatible terminal  
 - [ ] macOS or Linux system (WSL2 also supported)  
-- [ ] Basic knowledge of CLI and file paths  
+- [ ] Basic knowledge of CLI and file paths
+- [ ] 'make' command installed to install run: (command -v apt >/dev/null && sudo apt update && sudo apt upgrade -y && sudo apt install -y make) || (command -v dnf >/dev/null && sudo dnf upgrade -y && sudo dnf install -y make) || (command -v pacman >/dev/null && sudo pacman -Syu --noconfirm make) || (command -v brew >/dev/null && brew update && brew upgrade && brew install make)
 
 ---
 
 ### 2. Install Q Locally
 
 Run:
+
 
 make install
 
