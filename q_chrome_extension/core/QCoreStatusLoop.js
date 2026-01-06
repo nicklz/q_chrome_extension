@@ -276,6 +276,8 @@
                             RETURN THE JSON FO A QID FORMAT qid increment from ${qid} and replace q_manifest with q_write unless its a bash q_command needed , filepath (string full pwd path with sandbox in the path), content (string)
                             WHEN YOU GENERATE THE README cover the list of commands for makefile and at top of readme try and re-sell the idea of the app from the original business proposal that was given to you, the original ticket, this is a marketing guys job so go full sales pitch on the idea a few paragraphs OK DO THIS WHEN GENERATING THE README + EXPAND UPON IT MARKDOWN FILE
 
+                            ALSO DO NOT USE JS VITE UNLESS OVERRIDEN AND REQUESTED SPECIFICALLY JUST USE npm run start for react projects or node projects, run them through your makefile 
+
 
                             Database Tables & CRUD Operations:
 
