@@ -127,4 +127,4 @@ Legacy identifiers using older formats such as q_command_4 may be mapped into th
 
 ## Summary
 The QID format provides a compact, parseable, and extensible way to tag every actionable object in the Skynet and Nexus Q systems.
-- By enforcing a strict four part structure with a hardcoded prefix, typed middle segment, random or MD5-derived uuid segment, and integer sequence, it becomes possible to trace, validate, and automate complex workflows without losing critical information.
+- By enforcing a strict four part structure with a hardcoded prefix, typed middle segment, random or MD5-derived uuid segment, and integer sequence, it becomes possible to trace, validate, and automate complex workflows without losing critical information. 
