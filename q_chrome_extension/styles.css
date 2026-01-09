@@ -326,6 +326,10 @@ button.delete-button {
   font-family: Arial, sans-serif;
 }
 
+#skynet-container.hidden {
+  display: none !important;
+}
+
 /* Skynet container */
 .nexus-platforms.nexus-enabled #skynet-container {
   display: flex;

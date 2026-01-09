@@ -45,15 +45,15 @@ window.HEARTBEAT        = 2000;
     // ---- Menu: now delegates into QCore* plugins ---- 
     const menuIcons = [
         { emoji: '🤖', icon: null,                         title: 'Tools',          action: () => window.QCoreToolsModal?.showToolsModal() },
-        {                 icon: 'images/terminal.svg',     title: 'Terminal',       action: () => window.QCoreTerminalModal?.showTerminalModal() },
-        {                 icon: 'images/new.svg',          title: 'New',            action: () => window.QCoreTicketModal?.showNewTicket() },
-        {                 icon: 'images/files.svg',        title: 'Files',          action: () => window.QCoreFilesModal?.showFilesModal() },
+        {                 icon: 'images/terminal.svg',     title: 'Generate Manifest',       action: () => window.QCoreTerminalModal?.showTerminalModal() },
+        {                 icon: 'images/new.svg',          title: 'Create MVP',            action: () => window.QCoreMVPModal?.showMVPModal() },
+        {                 icon: 'images/files.svg',        title: 'Tickets',          action: () => window.QCoreFilesModal?.showFilesModal() },
         {                 icon: 'images/configuration.svg',title: 'Configuration',  action: () => window.QCoreSettings?.showSettingsModal() },    
         {                 icon: 'images/documentation.svg',title: 'Documentation',  action: () => window.QCoreDocumentation?.showDocumentationModal() },
         {                 icon: 'images/automate.svg',     title: 'Automate',       action: () => awaitUser() },                   // optional workflow
         {                 icon: 'images/play.svg',         title: 'Play',           action: () => window.QCorePlayControls?.playState() },
         {                 icon: 'images/pause.svg',        title: 'Pause',          action: () => window.QCorePlayControls?.pauseState() },
-        {                 icon: 'images/mute.svg',         title: 'Mute',           action: () => window.QCorePlayControls?.muteState() },
+        {                 icon: 'images/mute.svg',         title: 'Mute / Hide',           action: () => window.QCorePlayControls?.muteState() },
         {                 icon: 'images/restart.svg',      title: 'Restart',        action: () => window.QCorePlayControls?.restartAll()},
     ];
     
@@ -212,6 +212,7 @@ async function awaitUser() {
 
               if (state.prompt) {
                   sendPrompt(state.prompt);
+                  
                   console.log(`Sent prompt: ${state.prompt}`);
                   currentEventIndex++;
               } else {

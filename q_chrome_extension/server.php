@@ -707,338 +707,291 @@ function q_sanitize_content($content = '', $type = 'write') {
     return $content;
 }
 
+
+
+
+
+
+
+
+
 // ---------- /q_run: strict qid parse + always save/update + type-aware handling + full memcache dump ----------
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $uri === '/q_run') {
     $raw = file_get_contents('php://input');
     qlog('POST /q_run RAW', $raw);
 
-    $post     = json_decode($raw, true);
+    $post = json_decode($raw, true);
 
-    $qid      = is_array($post) ? ($post['qid'] ?? null)      : null;
-    $filepath = is_array($post) ? ($post['filepath'] ?? null) : null;
-    $content  = is_array($post) ? ($post['content']  ?? '')   : '';
-    $meta     = is_array($post) ? ($post['meta']     ?? [])   : [];
-    qlog('POST /q_run $post', 'prev 0');
+    // ---- qid extraction ----
+    $qid = is_array($post) ? ($post['qid'] ?? null) : null;
 
-    $qid_parts = explode('_', $qid);
-
-    if ($qid_parts > 1) {
-        $q_type = $qid_parts[1];
-    }
-    else {
-        $q_type = 'write';
-    }
-    
-    $content =  q_sanitize_content($content, $q_type);
-
-
-
-
-    // ---- qid validation & explode ----
-    // Must be "q_<type>_<uuid>_<number>[...]" with 4+ parts
     if (!is_string($qid) || $qid === '') {
         http_response_code(400);
         echo json_encode(['success' => false, 'error' => 'Missing qid']);
         exit;
     }
 
-    qlog('POST /q_run $post', 'prev 1');
-
+    // ---- qid parse: q_<type>_<uuid>_<number>[...] ----
     $parts = explode('_', $qid);
-    if (count($parts) < 2) {
-        qlog('POST /q_run $post', 'prev 2');
+    if (count($parts) < 3 || $parts[0] !== 'q') {
         http_response_code(400);
-        echo json_encode(['success' => false, 'error' => 'Invalid qid format: expected q_<type>_<uuid>_<number>']);
+        echo json_encode(['success' => false, 'error' => 'Invalid qid format']);
         exit;
-    }
-    if ($parts[0] !== 'q') {
-        qlog('POST /q_run $post', 'prev 3');
-        http_response_code(400);
-        echo json_encode(['success' => false, 'error' => 'Invalid qid: must start with "q_"']);
-        exit;
-    }
-    qlog('POST /q_run $post', 1);
-    $q_letter = $parts[0];                     // 'q'
-    $q_type   = strtolower($parts[1]);         // command|download|write|status
-
-    if (count($parts) > 2) {
-        $q_uuid   = $parts[2];                     // project key (opaque)
-        $q_runnum = $parts[count($parts) - 1];                     // numeric counter (string okay)
-    }
-    else {
-        $q_uuid   = 'error';                     // project key (opaque)
-        $q_runnum = $parts[count($parts) - 1];                     // numeric counter (string okay)
     }
 
-    qlog('POST /q_run $post', 2);
-    // Optional: allow additional underscore fragments after the 4th part; they’re ignored for routing
-    $allowed_types = ['command','download','write','status', 'manifest'];
-    if (!in_array($q_type, $allowed_types, true)) {
-        http_response_code(400);
-        echo json_encode(['success' => false, 'error' => "Invalid qid type '$q_type'"]);
-        exit;
-    }
+    $q_letter = $parts[0];
+    $q_type   = strtolower($parts[1]); // command | write | manifest | status | download
+    $q_uuid   = $parts[2];
+    $q_runnum = $parts[count($parts) - 1];
+
     if (!ctype_digit((string)$q_runnum)) {
         http_response_code(400);
         echo json_encode(['success' => false, 'error' => 'Invalid qid number segment']);
         exit;
     }
-    qlog('POST /q_run $post', 3);
-    // ---- create/update queue item immediately (always save/update) ----
+
+    $allowed_types = ['command', 'write', 'manifest', 'status', 'download'];
+    if (!in_array($q_type, $allowed_types, true)) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'error' => "Invalid qid type '$q_type'"]);
+        exit;
+    }
+
+    // ---- payload extraction (type-aware) ----
+    $filepath = null;
+    $content  = '';
+    $meta     = [];
+    $command  = null;
+
+    if ($q_type === 'command') {
+        // explicit: command is a bash command string
+        $command = is_array($post) ? ($post['command'] ?? null) : null;
+        if (!is_string($command) || trim($command) === '') {
+            http_response_code(400);
+            echo json_encode(['success' => false, 'error' => 'Missing or invalid "command"']);
+            exit;
+        }
+    } else {
+        // default + write/manifest path
+        $filepath = is_array($post) ? ($post['filepath'] ?? null) : null;
+        $content  = is_array($post) ? ($post['content']  ?? '')   : '';
+        $meta     = is_array($post) ? ($post['meta']     ?? [])   : [];
+        $content  = q_sanitize_content($content, $q_type);
+    }
+
+    // ---- queue bootstrap (always save/update) ----
     $key      = Q_ITEM_PREFIX . $qid;
     $existing = cache_get($key);
     $is_new   = !is_array($existing);
 
-    // Baseline snapshot before doing anything
     $initial_patch = [
         'qid'          => $qid,
         'queue_status' => 'generating',
         'errors'       => [],
         'state'        => [
             'step'      => 'q_run_start',
-            'qid_parts' => ['q'=>$q_letter, 'type'=>$q_type, 'uuid'=>$q_uuid, 'number'=>$q_runnum],
-            'filepath'  => $filepath,
-            'at'        => date('c')
+            'qid_parts' => [
+                'q'      => $q_letter,
+                'type'   => $q_type,
+                'uuid'   => $q_uuid,
+                'number' => $q_runnum
+            ],
+            'filepath' => $filepath,
+            'at'       => date('c')
         ],
         'raw'          => $raw
     ];
-    qlog('POST /q_run $post', 4);
+
     ensure_queue_item($qid, $raw, $initial_patch);
 
-    // ---- Type-aware execution paths ----
+    // ---- full memcache dump helper ----
+    $dump_all = function () {
+        $ids  = q_index_all();
+        $dump = [];
+        foreach ($ids as $id) {
+            $it = cache_get(Q_ITEM_PREFIX . $id);
+            if (is_array($it)) {
+                $dump[$id] = $it;
+            }
+        }
+        return $dump;
+    };
+
     $result_payload = null;
     $errors         = [];
 
-    // ---- collect full memcache dump for ALL RESPONSES ----
-    $ids  = q_index_all();
-    $dump = [];
-    foreach ($ids as $id) {
-        $it = cache_get(Q_ITEM_PREFIX . $id);
-        if (is_array($it)) $dump[$id] = $it;
-    }
-
-    qlog('POST /q_run $post', 5);
+    // ======================================================
+    // COMMAND PATH (explicit, forked, no write bleed-through)
+    // ======================================================
     if ($q_type === 'command') {
-        // Run the command EXACTLY as provided in $content; capture all output and exit code
-        
-    
         update_queue_item($qid, [
             'queue_status' => 'generating',
-            'state' => ['step' => 'command_start', 'command' => $content, 'at' => date('c')]
+            'state'        => [
+                'step'    => 'command_start',
+                'command' => $command,
+                'at'      => date('c')
+            ]
         ]);
 
-        $cmdOut = [];
-        $cmdCode = 0;
-        // Redirect stderr to stdout to capture everything
-        exec($content . ' 2>&1', $cmdOut, $cmdCode);
-        $fullOutput = implode("\n", $cmdOut);
+        $output = [];
+        $exit   = 0;
+
+        // run EXACT bash command, capture stdout + stderr
+        exec($command . ' 2>&1', $output, $exit);
+        $outText = implode("\n", $output);
 
         $result_payload = [
-            'status'            => ($cmdCode === 0),
-            'command'           => $content,
-            'command_response'  => [
-                'exit_code' => $cmdCode,
-                'output'    => $fullOutput
+            'status'   => ($exit === 0),
+            'type'     => 'command',
+            'command'  => $command,
+            'response' => [
+                'exit_code' => $exit,
+                'output'    => $outText
             ]
         ];
-        if ($cmdCode !== 0) {
-            $errors[] = "Command exited with code $cmdCode";
+
+        if ($exit !== 0) {
+            $errors[] = "Command exited with code $exit";
         }
 
         update_queue_item($qid, [
             'queue_status' => 'complete',
             'result'       => $result_payload,
             'errors'       => $errors,
-            'state'        => ['step' => 'command_complete', 'at' => date('c')]
+            'state'        => [
+                'step' => 'command_complete',
+                'at'   => date('c')
+            ]
         ]);
 
-    } elseif ($q_type === 'write' || $q_type === 'manifest') {
-        
-    qlog('POST /q_run $post', 11);
-        // Write file path/content (delete first) + git status (compatible with previous behavior)
+        echo json_encode([
+            'status'       => $is_new ? 'new' : 'ok',
+            'qid'          => $qid,
+            'type'         => 'command',
+            'result'       => $result_payload,
+            'errors'       => $errors,
+            'server_state' => $dump_all(),
+            'timestamp'    => date('c')
+        ]);
+        exit;
+    }
+
+    // ======================================================
+    // WRITE / MANIFEST PATH (DEFAULT, UNCHANGED BEHAVIOR)
+    // ======================================================
+    if ($q_type === 'write' || $q_type === 'manifest') {
         if (!is_string($filepath) || $filepath === '') {
-            
-    qlog('POST /q_run $post', 12);
-            http_response_code(400);
-            $err = ['success' => false, 'error' => 'Missing or invalid "filepath"'];
             update_queue_item($qid, [
-                'errors' => array_merge((cache_get($key)['errors'] ?? []), ['Missing or invalid "filepath"']),
+                'errors' => ['Missing or invalid "filepath"'],
                 'state'  => ['step' => 'q_run_error', 'at' => date('c')]
             ]);
-            
-    qlog('POST /q_run $post', 13);
-            // Always dump memcache with error
-            $ids  = q_index_all();
-            $dump = [];
-            foreach ($ids as $id) {
-                $it = cache_get(Q_ITEM_PREFIX . $id);
-                if (is_array($it)) $dump[$id] = $it;
-            }
-            
-    qlog('POST /q_run $post', 14);
-            echo json_encode(array_merge($err, [
+
+            echo json_encode([
+                'success'      => false,
                 'qid'          => $qid,
-                'server_state' => $dump,
-                'timestamp'    => date('c'),
-                'status'       => $is_new ? 'new' : 'error'
-            ]));
+                'error'        => 'Missing or invalid "filepath"',
+                'server_state' => $dump_all(),
+                'timestamp'    => date('c')
+            ]);
             exit;
         }
 
-        // ensure directory exists
         $dir = dirname($filepath);
-        if (!is_dir($dir)) { @mkdir($dir, 0777, true); }
-
-        // delete old file then write new
-        if (file_exists($filepath)) { @unlink($filepath); }
-
-        
-        if (trim($content) === '') {
-            if (file_exists($filepath)) {
-                $skip_write = true;
-            }
+        if (!is_dir($dir)) {
+            @mkdir($dir, 0777, true);
         }
-        
-        if (!$skip_write) {
+
+        if (file_exists($filepath)) {
+            @unlink($filepath);
+        }
+
+        $bytes = null;
+        if (trim($content) !== '') {
             $bytes = @file_put_contents($filepath, $content);
+        } else {
+            $bytes = 0;
         }
-    
 
-        // git status
         $gitLines = [];
         $gitCode  = 0;
         @exec('git status --porcelain=v1 2>&1', $gitLines, $gitCode);
-        $gitOutput = implode("\n", $gitLines);
 
         $result_payload = [
-            'status'         => $bytes !== false,
-            'filepath'       => $filepath,
-            'bytes_written'  => $bytes === false ? 0 : $bytes,
-            'git_status'     => ['exit_code' => $gitCode, 'output' => $gitOutput]
+            'status'        => ($bytes !== false),
+            'type'          => 'write',
+            'filepath'      => $filepath,
+            'bytes_written' => ($bytes === false ? 0 : $bytes),
+            'git_status'    => [
+                'exit_code' => $gitCode,
+                'output'    => implode("\n", $gitLines)
+            ]
         ];
+
         if ($bytes === false) {
             $errors[] = 'File write failed';
         }
 
-        qlog('POST /q_run $post', 9);
         update_queue_item($qid, [
             'queue_status' => 'complete',
             'result'       => $result_payload,
             'errors'       => $errors,
-            'state'        => ['step' => 'q_run_complete', 'timestamp' => date('c')]
-        ]);
-
-    }
-    
-    elseif ($q_type === 'status') {
-        
-    qlog('POST /q_run $post', 10);
-        update_queue_item($qid, [
-            'queue_status' => 'status',
-            'result'       => $post['state'],
-            'errors'       => $errors,
-            'state'        => ['step' => 'q_run_complete', 'timestamp' => date('c')]
+            'state'        => [
+                'step' => 'q_run_complete',
+                'at'   => date('c')
+            ]
         ]);
 
         echo json_encode([
-            'status'        => $is_new ? 'new' : 'ok',
-            'qid'           => $qid,
-            'type'          => $q_type,
-            'server_state'  => $dump,
-            'timestamp'     => date('c')
+            'status'       => $is_new ? 'new' : 'ok',
+            'qid'          => $qid,
+            'type'         => $q_type,
+            'result'       => $result_payload,
+            'errors'       => $errors,
+            'server_state' => $dump_all(),
+            'timestamp'    => date('c')
         ]);
-
         exit;
     }
 
-    else {
-        // For other types (download/status/unknown): just record flexible payload and mark complete
-        update_queue_item($qid, [
-            'queue_status' => 'generating',
-            'state'        => ['step' => 'type_dispatch', 'type' => $q_type, 'at' => date('c')]
-        ]);
-
-        $result_payload = [
-            'status'  => true,
-            'message' => 'No-op for this type in /q_run; recorded state only',
-            'type'    => $q_type,
-            'meta'    => $meta
-        ];
-
-        update_queue_item($qid, [
-            'queue_status' => 'complete',
-            'result'       => $result_payload,
-            'errors'       => [],
-            'state'        => ['step' => 'generic_complete', 'at' => date('c')]
-        ]);
-    }
-
-    qlog('POST /q_run $post', 6);
-
-    qlog('POST /q_run updated queue', $qid);
-
-    echo json_encode([
-        'status'        => $is_new ? 'new' : 'ok',
-        'qid'           => $qid,
-        'type'          => $q_type,
-        'result'        => $result_payload,
-        'errors'        => $errors,
-        'server_state'  => $dump,
-        'timestamp'     => date('c')
+    // ======================================================
+    // STATUS / FALLBACK
+    // ======================================================
+    update_queue_item($qid, [
+        'queue_status' => 'complete',
+        'result'       => $post['state'] ?? null,
+        'errors'       => [],
+        'state'        => [
+            'step' => 'status_complete',
+            'at'   => date('c')
+        ]
     ]);
 
-    qlog('POST /q_run $post', 7);
-    exit;
-}
-
-
-// ---------- /run: enqueue + async process + return full dump ----------
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && $uri === '/run') {
-    $raw = file_get_contents('php://input');
-    qlog('POST /run RAW', $raw);
-
-    $maybe = json_decode($raw, true);
-    $clientQid = is_array($maybe) ? ($maybe['qid'] ?? null) : null;
-
-    $qid = parse_qid_or_default($clientQid, $raw);
-
-    // Create or refresh queue item at 'idle' (if exists, keep original created_at)
-    $existing = cache_get(Q_ITEM_PREFIX . $qid);
-    if (is_array($existing)) {
-        // Update raw/state but keep lifecycle sane
-        update_queue_item($qid, [
-            'raw'          => $raw,
-            'queue_status' => 'idle',
-            'state'        => ['step' => 're-enqueue', 'at' => date('c')]
-        ]);
-    } else {
-        create_queue_item($qid, $raw);
-    }
-
-    // Spawn background worker (no output). Worker flips to 'generating' and then 'complete'
-    $phpBin   = PHP_BINARY ?: 'php';
-    $selfFile = escapeshellarg(__FILE__);
-    $safeQid  = escapeshellarg($qid);
-    $cmd = "$phpBin $selfFile process $safeQid > /dev/null 2>&1 &";
-    @shell_exec($cmd);
-
-    // Full memcache dump
-    $ids = q_index_all();
-    $dump = [];
-    foreach ($ids as $id) {
-        $it = cache_get(Q_ITEM_PREFIX . $id);
-        if (is_array($it)) $dump[$id] = $it;
-    }
-
     echo json_encode([
-        'success'      => 'idle', // enqueue state
-        'enqueued'     => cache_get(Q_ITEM_PREFIX . $qid),
+        'status'       => $is_new ? 'new' : 'ok',
         'qid'          => $qid,
-        'server_state' => $dump,
+        'type'         => $q_type,
+        'server_state' => $dump_all(),
         'timestamp'    => date('c')
     ]);
     exit;
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 // ---------- 404 ----------
 http_response_code(404);

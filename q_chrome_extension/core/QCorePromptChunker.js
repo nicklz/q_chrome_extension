@@ -147,9 +147,14 @@
   function findSendBtn() { return document.querySelector('button[data-testid="send-button"]'); }
 
   function sendPrompt(prompt) {
+
+    if (!!document.querySelector('[data-testid="screen-threadFlyOut"]')) {
+      console.log('🟨🟨🟨🟨🟨🟨🟨🟨 SEND PROMPT BLOCKED threadFlyOut: ', prompt);
+      return;
+    }
     console.log('🔵🔵🔵🔵🔵🔵🔵🔵 SEND PROMPT: ', prompt);
     const ta = document.querySelector('#prompt-textarea');
-
+    
     if (!ta) return;
     ta.textContent = prompt;
     setTimeout(() => findSendBtn()?.click(), 500);
@@ -160,7 +165,8 @@
 
     // Wait until the submit/stop button is NOT present (generation finished)
     while (document.querySelector('#composer-submit-button')) {
-      console.log('[Q] - 🔹🔹🔹 Generating ...');
+
+      console.log('[Q] - 🔹🔹🔹 Generating ...', state);
       await new Promise(r => setTimeout(r, 1000));
     }
 

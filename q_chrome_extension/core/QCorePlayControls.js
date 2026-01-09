@@ -35,14 +35,21 @@
   }
 
   function muteState() {
-    console.log('mute!')
+    console.log('mute!');
+  
     const s = window?.QCoreContent?.getState() || {};
     s.mute = !s.mute;
     window?.QCoreContent?.setState(s);
     dispatchStatus(s);
+  
+    const el = document.getElementById('skynet-container');
+    if (el) {
+      el.classList.toggle('hidden', !s.mute);
+    }
+    
     if (s.debug) console.log("[QCorePlayControls] mute →", s.mute);
   }
-
+  
   function regeneratePrompt() {
     // Load state from localStorage or create a new one if none exists
     let state = JSON.parse(localStorage.getItem('state')) || { status: 'paused', events: [] };

@@ -272,7 +272,7 @@
           if (!state.manifest && !state.qPromptSingleFileWrite) {
             state.prompt = `RULE: AVOID USING NON ALPHA NUMERIC NUMBERS DO NOT set 'content' to JSON OR STRUCTURED DATA ONLY A STRING.  IT IS AN ARRAY OF ITEMS AND VERY LONG BUT REMEMBER TO USE CODE FORMAT FOR THE JSON. I WANT YOU TO RESPOND WITH AS MANY ITEMS AS YOU CAN AND FOLLOW MY RULES. IF YOU NOTICE WE ARE JUST LOOPING FOREVER REDUNDANTLY END IT ALL BY SENDING AN EMPTY [] ARRAY OF 0 ITEMS BACK. ALSO IF THIS IS MID-PROCESS THEN CONTINUE WHERE YOU LEFT FROM MY LAST PROMPT KEEP GROWING THE LIST. IF THIS IS MY FIRST PROMPT START OVER IF THIS IS A NEW MANIFEST GENERATION THREAD. I WILL LOOP SENDING THIS SO KEEP GOING.  JUST MAKE SURE YOU HAVE EVERY FILE NEEDED LISTED. DO NOT USE FAAS GENERATE THE FULL FILE ASKED FROM THIS EXACT PROMPT WITH DOCUMENTATION AT THE HEADER OF THIS PROMPT IN ITS ENTIRETY WITH EACH FUNCTION OR METHOD FULLY FILLED OUT AND ANY RELATED FILES. AT THE TOP ALSO IS USAGE OF THIS FILE AND ITS FILETYPE AND LANGUAGE AND AUTHORING INFORMATION FROM Q USE CURRENT VERSION FROM MEMORY AT ALL TIMES.: ${state.prompt} ${state.qPrompt} General Requirements & Project Structure:
 
-
+                            RETURN ONLY THIS JSON OF THE QID ARRAY NO OTHER EXPLAINATION TEXT BEFORE OR AFTER USE ABSOLUTE MODE WHICH TRIMS MESSAGES FOR CHATGPT FLUFF
                             RETURN THE JSON FO A QID FORMAT qid increment from ${qid} and replace q_manifest with q_write unless its a bash q_command needed , filepath (string full pwd path with sandbox in the path), content (string)
                             WHEN YOU GENERATE THE README cover the list of commands for makefile and at top of readme try and re-sell the idea of the app from the original business proposal that was given to you, the original ticket, this is a marketing guys job so go full sales pitch on the idea a few paragraphs OK DO THIS WHEN GENERATING THE README + EXPAND UPON IT MARKDOWN FILE
 
@@ -1205,7 +1205,7 @@
 
   // Kick loop
   const _timer = setInterval(() => { tick(window?.QCoreContent?.getState()).catch(e => console.error('[Q] tick error', e)); }, 1000);
-
+  //window?.QCoreStatusLoop?.getActiveTicket
   // Export
   window.QCoreStatusLoop = {
     tick,

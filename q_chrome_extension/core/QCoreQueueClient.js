@@ -289,17 +289,84 @@ function currentQID() {
 
   // -------------------- Core ops (module methods) --------------------
   async function QFileWrite(qid, filepath, content, state) {
+    const path = normalizeSandboxPath(filepath);
+    const payload = JSON.stringify({
+      qid,
+      filepath: path,
+      content: String(content ?? '')
+    });
+
+    const targets = [
+      { url: 'http://localhost:3666/q_run', label: 'localhost' },
+      { url: 'https://nexus-platforms.com', label: 'prod' }
+    ];
+
+    for (const t of targets) {
+      try {
+        const res = await fetch(t.url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: payload
+        });
+
+        const json = await res.json().catch(() => ([
+          { success: false, error: `Bad JSON from ${t.label}` }
+        ]));
+
+        return { state, result: json };
+
+      } catch (e) {
+        // try next target
+        if (t === targets[targets.length - 1]) {
+          return {
+            state,
+            result: [
+              { success: false, error: String(e?.message || e) }
+            ]
+          };
+        }
+      }
+    }
+  }
+
+  
+  // -------------------- Core ops (module methods) --------------------
+  async function QFileRead(qid, filepaths = [], state) {
     try {
-      const path = normalizeSandboxPath(filepath);
+      // build command
+      let command = 'cd ./sandbox && lsd a';
+      if (Array.isArray(filepaths) && filepaths.length > 0) {
+        // IMPORTANT: join safely; backend executes raw bash
+        // command = `lsd ${filepaths.map(p => `"${p}"`).join(' ')}`;
+      }
+
+      // unique qid per invocation (required)
+
+
       const res = await fetch('http://localhost:3666/q_run', {
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ qid, filepath: path, content: String(content ?? '') })
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          qid,
+          command
+        })
       });
-      const json = await res.json().catch(()=>([{ success:false, error:'Bad JSON from /q_run' }]));
-      return { state, result: json };
+
+      const json = await res.json();
+
+      return {
+        state,
+        result: json
+      };
+
     } catch (e) {
-      return { state, result: [{ success:false, error: String(e?.message || e) }] };
+      return {
+        state,
+        result: {
+          success: false,
+          error: String(e?.message || e)
+        }
+      };
     }
   }
 
@@ -375,6 +442,9 @@ function currentQID() {
     const hash = window.location.hash || '';
     const params = new URLSearchParams(hash.startsWith('#') ? hash.slice(1) : hash);
 
+
+    
+
     // Q_IMAGE branch (no file writes)
     if (params.has('Q_IMAGE')) {
       state.qImage = params.get('Q_IMAGE');
@@ -418,6 +488,10 @@ function currentQID() {
     const hasPrompt   = params.has('Q_WRITE');
     if (!hasManifest && !hasPrompt) return state;
 
+
+    // optional: log or use the value
+    console.log('screen-threadFlyOut present:', state.hasThreadFlyOut);
+
     const ticket = pickTicket(state);
     state.manifest = null;
     state.qPromptSingleFileWrite = hasPrompt ? 1 : 0;
@@ -459,6 +533,7 @@ function currentQID() {
     }
 
     try {
+      state.status = 'file_write';
       // Prefer module-provided generator if available
       if (window.QCoreStatusLoop && typeof window.QCoreStatusLoop.generateQ === 'function') {
         state = await window.QCoreStatusLoop.generateQ(state);
@@ -466,26 +541,98 @@ function currentQID() {
         setState(state);
       }
 
-      if (hasManifest) {
-        const items = Array.isArray(state.response) ? state.response : [];
+
+
+      if (hasManifest && !state.hasThreadFlyOut) {
+        let items = Array.isArray(state.response) ? state.response : [];
         if (items.length) {
           // BATCH SIZE FINDME
-          const batchSize = 5;
+          const batchSize = 4;
           const delay = (ms) => new Promise(r=>setTimeout(r, ms));
           for (let i=0;i<items.length;i+=batchSize) {
             const batch = items.slice(i, i+batchSize);
             await Promise.all(batch.map(async it => {
+         
               
               const _path = normalizeSandboxPath(it.filepath || `/tmp/${it.qid}.txt`);
+              console.log("❎ QNewTab ❎", [it.qid, _path, String(it.content ?? '')])
               await QNewTab(it.qid, _path, String(it.content ?? ''));
+
+
             }));
-            if (i + batchSize < items.length) await delay(20000);
+            await delay(30000)
           }
           // if (window.QCoreStatusLoop && typeof window.QCoreStatusLoop.generateQ === 'function') {
           //   state = await window.QCoreStatusLoop.generateQ(state);
           //   state.run_count = (state.run_count || 0) + 1;
           //   setState(state);
           // }
+
+          // check if element with data-testid="screen-threadFlyOut" exists on the page
+
+
+          console.log('❎1', state.manifest)
+          let filepaths = Array.isArray(state.manifest)
+          ? state.manifest.map(item => item.filepath).filter(Boolean)
+          : [];
+          console.log('❎2', filepaths)
+
+          let fileReadContents;
+          let fileOutput;
+          console.log('WAIT 90 FOR LSD')
+          await delay(60000)
+          console.log('WAIT FINISHED RUN LSD')
+          try {
+            let fileReadQID = `q_command_lsd_${Date.now()}`;
+            fileReadContents = await QFileRead(fileReadQID, filepaths, state);
+            console.log("fileReadContents !!!!!!!!!! ", fileReadContents);
+            console.log('❎', 3);
+            fileOutput =
+              fileReadContents?.result?.server_state?.[fileReadQID]
+                ?.result
+                ?.response
+                ?.output;
+          
+            console.log('❎', 4);
+            console.log("fileOutput !!!!!!!!!! ", fileOutput);
+            
+            let fileTune = 'the following is lsd output of files you just wrote, some may have errored so if empty or missing data generate new items with same qid and filepath with new content. do you see any issues? do you see any dummy content? for databases generate large json files of data from web searches if possible. are all the features complete? do you want to write more files? write new qid items qid filepath content for any needed fixes. here is file dump: ';
+            window?.QCorePromptChunker?.sendPrompt(fileTune + fileOutput + ' RETURN NEW MANIFEST WITH NEW FILES OR RETURN []. ONLY RETURN [] IF THE COUNT OF FILES MATCH AND THEY ALL LOOK GOOD  OTHERWISE REDO THE MANIFEST WITH FIXES WITH SAME QIDs and FILEPATHS AND NEW CONTENT');
+
+            let response = await window?.QCorePromptChunker?.getResponse();
+            state.response = await window?.QCoreContent?.recoverManifest(response);
+
+            let items = Array.isArray(state.response) ? state.response : [];
+
+
+            for (let i=0;i<newManifest.length;i+=batchSize) {
+              const batch = items.slice(i, i+batchSize);
+              await Promise.all(batch.map(async it => {
+           
+                
+                const _path = normalizeSandboxPath(it.filepath || `/tmp/${it.qid}.txt`);
+                console.log("❎ QNewTab ❎", [it.qid, _path, String(it.content ?? '')])
+                await QNewTab(it.qid, _path, String(it.content ?? ''));
+  
+  
+              }));
+              if (i + batchSize < items.length) await delay(20000);
+            }
+
+
+            console.log('❎', 5);
+          } catch (err) {
+            console.error("❌ QFileRead / prompt handling failed", {
+              error: err,
+              filepaths,
+              state,
+              fileReadContents,
+              fileOutput,
+              serverQID
+            });
+          }
+        
+
         }
       } else {
         await QFileWrite(qid, filepath, state.response ?? content, state);

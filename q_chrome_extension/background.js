@@ -98,6 +98,7 @@ const ALWAYS = [
   "core/QCorePlayControls.js",
   "core/QCorePeopleManager.js",
   "core/QCoreTerminalModal.js",
+  "core/QCoreMVPModal.js",
   "core/QCoreFilesModal.js",
   "core/QCoreTicketModal.js",
   "core/QCoreDocumentation.js",
