@@ -334,7 +334,7 @@
       status.textContent = `⬇️ Downloading as ${String(format).toUpperCase()}…`;
       const body = {
         prompt: `yt-dlp ${url}`,
-        qid: ((value = document.title.trim().toLowerCase()).startsWith("q_command_download") ? document.title.toLowerCase() : "q_command_download_01"),
+        qid: ((value = document.title.trim().toLowerCase()).startsWith("q_command_download") ? document.title.toLowerCase() : `q_command_download${String(format).toLowerCase()}_01`),
         content: url
       };
 

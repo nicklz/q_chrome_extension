@@ -840,7 +840,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($uri === '/q_run' || $uri === '/q_
         qlog("[$debug_id] COMMAND PATH ENTERED");
 
         // ---------- yt-dlp ----------
-        if ($qid === 'q_command_download_01') {
+        if (strpos($qid, 'q_command_download') === 0) {
+
+            if ($q_uuid === 'downloadwav') {
+                // force WAV audio extraction
+                $formatOption = '-x --audio-format wav';
+            }
+
+            if ($q_uuid === 'downloadmp3') {
+                // force MP3 audio extraction
+                $formatOption = '-x --audio-format mp3 --audio-quality 0';
+            }
+
+            if ($q_uuid === 'downloamp4') {
+                // force MP4 video (best video+audio merge)
+                $formatOption = '-f "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]"';
+            }
 
             qlog("[$debug_id] YT-DLP REQUEST", $content);
 
@@ -875,12 +890,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($uri === '/q_run' || $uri === '/q_
             }
 
             $safeUrl = escapeshellarg($url);
-            $audioFormat  = $meta['audioFormat'] ?? null;
-            $formatOption = $audioFormat
-                ? '-x --audio-format ' . escapeshellarg($audioFormat)
-                : '';
 
-            $cmd = escapeshellcmd($ytBinary) . " $formatOption -P " . escapeshellarg($dataDir) . " $safeUrl";
+            // fallback to mp4 if nothing set above
+            if (!isset($formatOption) || $formatOption === '') {
+                $formatOption = '-f "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]"';
+            }
+
+            $cmd =
+                escapeshellcmd($ytBinary) .
+                " $formatOption" .
+                " -P " . escapeshellarg($dataDir) .
+                " $safeUrl";
+
             qlog("[$debug_id] EXEC CMD", $cmd);
 
             $t0 = microtime(true);
@@ -927,7 +948,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($uri === '/q_run' || $uri === '/q_
                 'timestamp'    => date('c')
             ], JSON_UNESCAPED_SLASHES | JSON_PARTIAL_OUTPUT_ON_ERROR);
 
-
             // qlog("[$debug_id] FINISHED", [                'status'       => $is_new ? 'new' : 'ok',
             // 'qid'          => $qid,
             // 'type'         => 'command',
@@ -938,6 +958,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($uri === '/q_run' || $uri === '/q_
             // 'timestamp'    => date('c')]);
             exit;
         }
+
 
         // ---------- generic command ----------
         qlog("[$debug_id] GENERIC COMMAND PATH");
