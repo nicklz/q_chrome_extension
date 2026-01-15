@@ -14,7 +14,7 @@
   }
 
   // Promise that resolves when selector exists (or rejects after timeout)
-  function waitForSelector(selector, { timeout = 15000, root = document } = {}) {
+  function waitForSelector(selector, { timeout = 25000, root = document } = {}) {
     return new Promise((resolve, reject) => {
       const el = root.querySelector(selector);
       if (el) return resolve(el);
@@ -45,12 +45,12 @@
           obs.disconnect();
           resolve(found);
         }
-      }, 250);
+      }, 1500);
     });
   }
 
   // Promise that resolves when fn() returns a function reference
-  function waitForFunction(getter, { timeout = 15000 } = {}) {
+  function waitForFunction(getter, { timeout = 25000 } = {}) {
     return new Promise((resolve, reject) => {
       try {
         const v = getter();

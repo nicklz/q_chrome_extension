@@ -12,6 +12,12 @@
 # - Guard: Verifies `php -m` contains memcache or memcached before continuing.
 # no critical data is lost
 
+sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp && sudo chmod +x /usr/local/bin/yt-dlp
+
+
+command -v yt-dlp >/dev/null 2>&1 && echo "yt-dlp already installed 🟩 🟩 🟩" || (sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp && sudo chmod +x /usr/local/bin/yt-dlp)
+
+
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

@@ -333,26 +333,20 @@
     function runDownload(url, format, originBtn) {
       status.textContent = `⬇️ Downloading as ${String(format).toUpperCase()}…`;
       const body = {
-        prompt: `yt-dlp download ${format}`,
-        qid: ((value = document.title.trim().toLowerCase()).startsWith("q_") ? document.title.toLowerCase() : "q_error_download_1"),
-        faas: [
-          {
-            type: "command",
-            subtype: "yt-dlp",
-            content: url,
-            meta: format === "mp3" || format === "wav" ? { audioFormat: format } : {},
-          },
-        ],
+        prompt: `yt-dlp ${url}`,
+        qid: ((value = document.title.trim().toLowerCase()).startsWith("q_command_download") ? document.title.toLowerCase() : "q_command_download_01"),
+        content: url
       };
 
-      fetch("http://localhost:3666/run", {
+      fetch("http://localhost:3666/q_run_video_download", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       })
         .then((res) => res.json())
         .then((res) => {
-          const ok = !!res?.[0]?.success;
+          console.log('HERE res!!!!!!!!!!!!!!!', res);
+          const ok = !!res?.result?.status;
           status.textContent = ok
             ? `✅ ${String(format).toUpperCase()} Download Complete`
             : `❌ Download Failed (${String(format).toUpperCase()}): ` + (res?.[0]?.error || "Unknown");
