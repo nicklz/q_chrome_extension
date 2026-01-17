@@ -142,42 +142,71 @@ ensure_php_memcache_modules_linux() {
   php -m 2>/dev/null | egrep -i 'memcache|memcached' || true
   die "Linux: Failed to load PHP memcache(d) after apt install."
 }
-
 install() {
   log "Installing [Q] prerequisites..."
 
-  is_macos || return 0
-
-  # Xcode Command Line Tools (required for git, gcc, etc.)
-  if ! xcode-select -p >/dev/null 2>&1; then
-    log "Installing Xcode Command Line Tools..."
-    xcode-select --install
-    until xcode-select -p >/dev/null 2>&1; do sleep 5; done
+  # ---- OS DETECTION ----
+  if is_macos; then
+    echo "Detected macOS"
+    OS_TYPE="macos"
+  elif is_linux; then
+    echo "Detected Linux"
+    OS_TYPE="linux"
+  else
+    die "Unsupported OS"
   fi
 
-  # Homebrew
-  if ! command -v brew >/dev/null 2>&1; then
-    log "Installing Homebrew..."
-    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-    eval "$(/opt/homebrew/bin/brew shellenv 2>/dev/null || /usr/local/bin/brew shellenv)"
-  fi
-
-  # Git
-  if ! command -v git >/dev/null 2>&1; then
-    log "Installing git..."
-    brew install git
-  fi
-
-  # Common local web dev tools
-  for pkg in node yarn wget jq; do
-    if ! command -v "$pkg" >/dev/null 2>&1; then
-      log "Installing $pkg..."
-      brew install "$pkg"
+  # ---- macOS PATH (CLEAR, ISOLATED) ----
+  if [ "$OS_TYPE" = "macos" ]; then
+    # Xcode Command Line Tools
+    if ! xcode-select -p >/dev/null 2>&1; then
+      log "Installing Xcode Command Line Tools..."
+      xcode-select --install
+      until xcode-select -p >/dev/null 2>&1; do sleep 5; done
     fi
-  done
 
-  log "[Q] prerequisites installed"
+    # Homebrew
+    if ! command -v brew >/dev/null 2>&1; then
+      log "Installing Homebrew..."
+      /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+      eval "$(/opt/homebrew/bin/brew shellenv 2>/dev/null || /usr/local/bin/brew shellenv)"
+    fi
 
+    # Core tools
+    brew update || true
+    brew install \
+      git node yarn wget jq curl unzip tree htop \
+      python3 nginx php memcached ffmpeg \
+      bat eza ripgrep fd fzf neovim tmux gh deno pnpm nvm \
+      zsh-autosuggestions zsh-syntax-highlighting \
+      figlet toilet lolcat fortune cowsay watch midnight-commander httpie \
+      zlib pkg-config libmemcached openssl@3 \
+      || true
+
+    brew services restart memcached >/dev/null 2>&1 || true
+    ensure_php_memcache_modules_macos
+  fi
+
+  # ---- LINUX PATH (CLEAR, ISOLATED) ----
+  if [ "$OS_TYPE" = "linux" ]; then
+    sudo apt update -y
+    sudo apt upgrade -y
+
+    sudo apt install -y \
+      build-essential net-tools netcat-openbsd \
+      git curl wget unzip tree htop jq \
+      nodejs npm yarn \
+      python3 python3-pip python3-venv \
+      php php-cli php-common php-curl php-mysql \
+      nginx memcached ffmpeg figlet toilet lolcat \
+      || true
+
+    ensure_php_memcache_modules_linux
+  fi
+
+  log "[Q] system dependencies installed"
+
+  # ---- ENV SETUP ----
   rm -f .env || true
 
   read -r -p "Enter PROJECT_PATH_TOKEN (Leave empty for current directory): " project_path_token
@@ -185,11 +214,10 @@ install() {
     project_path_token="$(pwd)"
   fi
 
-  log "Generating .env file..."
   [ -f .env_EXAMPLE ] || die ".env_EXAMPLE not found in $(pwd)"
   cp .env_EXAMPLE .env
 
-  if is_macos; then
+  if [ "$OS_TYPE" = "macos" ]; then
     sed -i "" "s|^PROJECT_PATH_TOKEN=.*|PROJECT_PATH_TOKEN=${project_path_token}|" .env
     sed -i "" "s|^INSTALL_PATH=.*|INSTALL_PATH=$(pwd)|" .env
     sed -i "" "s|^USER=.*|USER=$(whoami):$(id -gn)|" .env
@@ -199,35 +227,7 @@ install() {
     sed -i "s|^USER=.*|USER=$(whoami):$(id -gn)|" .env
   fi
 
-  log "Installing system dependencies..."
-  if is_macos; then
-    command -v brew >/dev/null 2>&1 || die "Homebrew not found. Install from https://brew.sh/"
-    brew update || true
-
-    brew install \
-      memcached figlet toilet tree node php curl git wget unzip htop lolcat python3 nginx bat eza ripgrep fd fzf neovim tmux gh deno yarn pnpm nvm \
-      zsh-autosuggestions zsh-syntax-highlighting fortune cowsay watch midnight-commander jq httpie ffmpeg \
-      zlib pkg-config libmemcached openssl@3 \
-      || true
-
-    brew services restart memcached >/dev/null 2>&1 || true
-
-    ensure_php_memcache_modules_macos
-
-  elif is_linux; then
-    sudo apt update -y
-    sudo apt upgrade -y
-    sudo apt install -y \
-      memcached netcat-openbsd \
-      figlet toilet nginx tree nodejs npm php php-cli php-common php-curl php-mysql curl git wget unzip build-essential htop net-tools lolcat \
-      python3 python3-pip python3-venv ffmpeg jq \
-      || true
-
-    ensure_php_memcache_modules_linux
-  else
-    die "Unsupported OS: ${OS}"
-  fi
-
+  # ---- PYTHON VENV ----
   log "Setting up Python venv..."
   rm -rf "${VENV}"
   ${PY} -m venv --without-pip "${VENV}"
@@ -243,6 +243,7 @@ install() {
     "${VENV}/bin/pip" install openai
   fi
 
+  # ---- NPM ----
   log "Installing npm deps..."
   if command -v npm >/dev/null 2>&1; then
     npm install
@@ -250,7 +251,8 @@ install() {
     warn "npm not found; skipping npm install."
   fi
 
-  if is_macos && [ -d "/Applications/Xcode.app/Contents/Developer/usr/bin" ]; then
+  # ---- OPTIONAL macOS BUILD STEP ----
+  if [ "$OS_TYPE" = "macos" ] && [ -d "/Applications/Xcode.app/Contents/Developer/usr/bin" ]; then
     log "Xcode toolchain detected; running 'make mosaic'..."
     make mosaic || true
   fi
@@ -259,6 +261,7 @@ install() {
   log "Run 'make up' next!"
   log ""
 }
+
 
 case "${1:-install}" in
   install) install ;;

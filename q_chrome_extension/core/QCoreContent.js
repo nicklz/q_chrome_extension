@@ -41,7 +41,6 @@
     'blockchain.com',
     'instagram.com',
     'spotify.com',
-    'reddit.com',
     'distrokid.com',
     'virginwifi.com',
     'runitbyq.com'
