@@ -265,8 +265,10 @@
 
           state.QMoveToProject = true;
           state = setLastSelection(state, res.ticket);
-
+          
+          state.tickets[0] = res.ticket;
           setState(state);
+          console.log('[Q] QCoreTicketModal state save!', state);
 
           if (!beforeId && res.ticket?.id) {
             id.value = res.ticket.id;
@@ -279,6 +281,7 @@
 
           msg.textContent = 'Saved.';
           refreshDelete();
+
           console.log('[Q] QCoreTicketModal saved ticket', res.ticket);
         } catch (e) {
           console.log('[Q] QCoreTicketModal save error', e);

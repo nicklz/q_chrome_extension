@@ -379,7 +379,22 @@ function currentQID() {
     try { await setGlobalState(globalState); } catch {}
 
     const url = `https://chatgpt.com/#Q_WRITE=${encodeURIComponent(qid)}|${encodeURIComponent(path)}|${encodeURIComponent(String(content ?? ''))}`;
-    window.open(url, qid, 'popup=yes,width=320,height=20,left=20000,top=15000,resizable=yes,scrollbars=yes');
+
+    // 🔔 fire notification request (unique every time)
+    chrome.runtime.sendMessage({
+      type: "Q_NEW_TAB_FIRED",
+      qid,
+      path,
+      ts: Date.now()
+    });
+
+    // 🪟 open new tab/window (already correct)
+    window.open(
+      url,
+      `Q_${qid}_${Date.now()}`, // unique window name
+      "popup=yes,width=320,height=20,left=20000,top=15000,resizable=yes,scrollbars=yes"
+    );
+
     return true;
   }
 
@@ -636,6 +651,16 @@ function currentQID() {
         }
       } else {
         await QFileWrite(qid, filepath, state.response ?? content, state);
+
+        chrome.runtime.sendMessage({
+          type: "Q_NEW_TAB_CLOSED",
+          qid,
+          path,
+          ts: Date.now()
+        });
+
+        
+        window.close();
         // restart via play-controls module if present
         setTimeout(() => {
           let n = 3;
@@ -645,7 +670,8 @@ function currentQID() {
             if (n === 0) {
               clearInterval(i);
               console.log("closing now 💀");
-              window.close();
+                  // 🔔 fire notification request (unique every time)
+
             }
           }, 100000);
         }, 3000);

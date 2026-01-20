@@ -196,6 +196,34 @@ chrome.runtime.onMessage.addListener((message) => {
   }
 });
 
+chrome.runtime.onMessage.addListener((msg) => {
+  if (msg.type === "Q_NEW_TAB_FIRED") {
+    const notificationId = `q-new-tab-${msg.qid}-${msg.ts}`;
+
+    chrome.notifications.create(notificationId, {
+      type: "basic",
+      iconUrl: "icon.png",
+      title: "Q Write Triggered",
+      message: `QID: ${msg.qid}\n${msg.path}`,
+      priority: 2
+    });
+  }
+});
+
+chrome.runtime.onMessage.addListener((msg) => {
+  if (msg.type === "Q_NEW_TAB_CLOSED") {
+    const notificationId = `q-new-tab-${msg.qid}-${msg.ts}`;
+
+    chrome.notifications.create(notificationId, {
+      type: "basic",
+      iconUrl: "icon.png",
+      title: "Job Complete",
+      message: `QID: ${msg.qid}\n${msg.path}`,
+      priority: 2
+    });
+  }
+});
+
 
 // ---- Message: CHECK_SITES (health checks from MV3 SW; avoids page CORS)
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {

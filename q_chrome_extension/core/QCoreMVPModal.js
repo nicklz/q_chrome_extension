@@ -31,7 +31,11 @@
 
         i understand it has backend requirements so i want you to summarize those into a schema, and we wont focus on building the backend yet we will generate it instead single file
 
-        write this schema into a javascript object in an index.html file, single html file with no backend but can use js to localstorage is ok
+        we are not doing any backend yet and first generating the data in this file with web searched real data.
+
+        write this database and its schema into a javascript object in an index.html file, single html file with no backend but can use js to localstorage is ok
+
+        state and database should be variables int he code that are globally and always accessible
 
         hard code a database from the schema, pick each table and do web searches to fill content, all database items should have a web earched image or icon that relates to it.
 
@@ -49,9 +53,15 @@
 
         have hero images and carousels
 
-        for each database table you make, create a page for listing those item onthe frontned. these pages have lots of filtesr and sorting buttons etc that are using slider bar ui, dropdowns, radios, checkboxes, buttons, datepickers, other cool ui form fields
+        for each database table you make, create a page for listing those item on the frontned. these pages have lots of filters and sorting buttons etc that are using slider bar ui, dropdowns, radios, checkboxes, buttons, datepickers, other cool ui form fields
 
         these page list the items in the database, with columns of their data, if you click the item it goes to a landing page where the item's image is shown as the hero and the article copy or whatever the item is displayed underneath. you will build these tailored to the data so sometimes show pie charts or graphs here too
+
+        all related items in the database are linkable to their 'node landing pages' where they generally have a unique appearance and color
+
+        all categories and tags are linked to pages where theres listing of other related items
+
+        nodes always have web searched images or generated svg logos the image is displyed as well as all information in table. if there is json meta data / objects display that as a Texts with <labels> remove formatting by using html instead
 
         darkmode, use tailwind, randomize the colorpallet. use cdn's foreverything you can 
 
@@ -69,12 +79,41 @@
 
         we have the ability to write images into ./images so generate a og.png for open graph facebook meta tag. the favicon needs to be embedded directly as svg into the html page however
         
-        write real production level copy no demo or mock 
+        write from web search real production level copy no demo or mock data ever
 
         real privacy and terms pages with real filled out content
         
         on any listing, browse page, interactive map, or such with filters or table data make sure you can sort and filter with very modern useful form widgets apply a cdn design system for components if needed
         
+
+        ** NEW ** 
+        Q when doing pro + extended jobs and generating content for the inline database, use the following example to generate images of web seerches and websites to gather REAL data not 'guessed'
+
+        https://image.thum.io/get/width/1200/noanimate/https://www.bing.com/search?q=JFK%20LAX%202026-01-20%20nonstop%20price
+
+        utitlize this thum.io system. search over the internet for ALWAYS REAL data never generated
+
+        build 20 categories for the content
+
+        5 main categories, 15 sub categories 3 sub category for each cat each and makes 20 total. every web searched item has a image url image for the content
+
+        all items in the database come with the image url and it preferably is actually using https://image.thum.io 99% of hte time unless a perfect alternative is present
+        all items if no image have a svg default logo
+
+
+        database.ALLTABLES[0].image =         'https://image.thum.io/get/width/1200/noanimate/https://www  .... 
+
+        basically all tables in the database, for each item find an image using this url
+
+        GENERAETE ALL IMAGES USING https://www.thum.io/
+
+
+        return full index.html of MVP
+
+
+        also generate a test.html that only has <img> tags of urls of iamges you searched for and are using from thum.io always. all images always using thum.io
+
+        give both files as download attachments the generated databases should take at least 20k lines they are in line keep that section of index.html as the database area
         `;
 
         let redirect_result = await window.QCoreQueueClient.QNewTab(qid, filepath, ticket + tune);
