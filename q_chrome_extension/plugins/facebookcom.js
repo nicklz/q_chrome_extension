@@ -1,7 +1,7 @@
 
 
 // Check if the current page is Facebook
-state = getState()
+state = {}
 
 
 if (document.querySelector('html').id === 'facebook' && state.status === 'play') {

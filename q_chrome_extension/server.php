@@ -301,7 +301,7 @@ function run_worker_for_qid($qid) {
                 $filepath = './sandbox/' . $filepath;
             }
 
-            $content =  q_sanitize_content($content, $q_type);
+            $content =  q_sanitize_content($content, $type);
 
             $skip_write = false;
 
@@ -673,6 +673,83 @@ function q_sanitize_content($content = '', $type = 'write') {
 }
 
 
+function q_forward_raw_post_to_nexus(string $debug_id = 'whatever', string $raw, string $uri): array {
+  // Target endpoint on nexus-platforms.com (change to your actual receiver path)
+  // Example receiver: https://nexus-platforms.com/api/q_run_ingest
+  $target = 'https://nexus-platforms.com/api/q_run_ingest';
+
+  // Preserve inbound Content-Type if present; default to JSON
+  $inContentType = $_SERVER['CONTENT_TYPE'] ?? $_SERVER['HTTP_CONTENT_TYPE'] ?? 'application/json; charset=utf-8';
+
+  // Build outbound headers
+  $headers = [
+    'Content-Type: ' . $inContentType,
+    'Accept: application/json',
+    'X-Q-Forwarded-From: ' . ($_SERVER['HTTP_HOST'] ?? 'unknown-host'),
+    'X-Q-Forwarded-Uri: ' . $uri,
+    'X-Q-Debug-Id: ' . $debug_id,
+  ];
+
+  // OPTIONAL: forward Authorization if you expect nexus-platforms.com to validate it
+  // (Be careful—only forward if you control both ends.)
+  if (!empty($_SERVER['HTTP_AUTHORIZATION'])) {
+    $headers[] = 'Authorization: ' . $_SERVER['HTTP_AUTHORIZATION'];
+  }
+
+  // OPTIONAL: add an HMAC signature so nexus-platforms.com can verify authenticity
+  // $sharedSecret = getenv('NEXUS_FORWARD_SECRET') ?: '';
+  // if ($sharedSecret !== '') {
+  //   $sig = hash_hmac('sha256', $raw, $sharedSecret);
+  //   $headers[] = 'X-Q-Signature: sha256=' . $sig;
+  // }
+
+  $ch = curl_init();
+  curl_setopt_array($ch, [
+    CURLOPT_URL            => $target,
+    CURLOPT_POST           => true,
+    CURLOPT_HTTPHEADER     => $headers,
+    CURLOPT_POSTFIELDS     => $raw,            // EXACT raw body forwarded
+    CURLOPT_RETURNTRANSFER => true,
+    CURLOPT_HEADER         => true,            // capture response headers+body
+    CURLOPT_TIMEOUT        => 30,
+    CURLOPT_CONNECTTIMEOUT => 10,
+    CURLOPT_FOLLOWLOCATION => false,
+    CURLOPT_SSL_VERIFYPEER => true,
+    CURLOPT_SSL_VERIFYHOST => 2,
+  ]);
+
+  $resp = curl_exec($ch);
+
+  if ($resp === false) {
+    $errNo  = curl_errno($ch);
+    $errStr = curl_error($ch);
+    $info   = curl_getinfo($ch);
+    curl_close($ch);
+    return [
+      'ok' => false,
+      'error' => 'curl_exec_failed',
+      'curl_errno' => $errNo,
+      'curl_error' => $errStr,
+      'info' => $info,
+    ];
+  }
+
+  $info = curl_getinfo($ch);
+  $headerSize = $info['header_size'] ?? 0;
+  $rawHeaders = substr($resp, 0, $headerSize);
+  $body       = substr($resp, $headerSize);
+
+  curl_close($ch);
+
+  return [
+    'ok' => true,
+    'http_code' => (int)($info['http_code'] ?? 0),
+    'resp_headers_raw' => $rawHeaders,
+    'resp_body' => $body,
+    'info' => $info,
+  ];
+}
+
 
 
 // ---------- /q_run: strict qid parse + always save/update + type-aware handling + full memcache dump + HARD DEBUG ----------
@@ -701,9 +778,70 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($uri === '/q_run' || $uri === '/q_
     // RAW INPUT
     // =========================
     $raw = file_get_contents('php://input');
+
+
+
+
+
+
+
+
+
+
+
+
+$forward = null;
+
+try {
+  $forward = q_forward_raw_post_to_nexus($debug_id, $raw, $uri);
+} catch (Throwable $e) {
+  error_log("[Q_FORWARD][$debug_id] Throwable: " . $e->getMessage() . " | " . $e->getFile() . ":" . $e->getLine());
+  error_log("[Q_FORWARD][$debug_id] Trace: " . $e->getTraceAsString());
+
+  // Optional: also log the raw size so you can correlate payload issues without dumping content
+  error_log("[Q_FORWARD][$debug_id] RawLen=" . strlen((string)$raw) . " Uri=" . (string)$uri);
+
+  // If you want your internal logger too (safe even if qlog is absent)
+  if (function_exists('qlog')) {
+    qlog("[$debug_id] q_forward_raw_post_to_nexus THROWABLE", [
+      'msg' => $e->getMessage(),
+      'file' => $e->getFile(),
+      'line' => $e->getLine(),
+      'raw_len' => strlen((string)$raw),
+      'uri' => (string)$uri,
+    ]);
+  }
+
+  // Keep the request alive; you can decide if you want to hard-fail instead:
+  // http_response_code(502);
+  // echo json_encode(['success'=>false,'error'=>'Forwarding failed','debug'=>$debug_id]);
+  // exit;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// If curl_exec fails it won't throw by default; log that too:
+if (is_array($forward) && ($forward['ok'] ?? false) === false) {
+  error_log("[Q_FORWARD][$debug_id] Forward failed: " . ($forward['error'] ?? 'unknown_error'));
+  if (!empty($forward['curl_errno'])) error_log("[Q_FORWARD][$debug_id] curl_errno=" . $forward['curl_errno']);
+  if (!empty($forward['curl_error'])) error_log("[Q_FORWARD][$debug_id] curl_error=" . $forward['curl_error']);
+}
     qlog("[$debug_id] RAW INPUT", $raw);
 
     $post = json_decode($raw, true);
+    
     if ($post === null && json_last_error() !== JSON_ERROR_NONE) {
         qlog("[$debug_id] JSON DECODE ERROR", json_last_error_msg());
         http_response_code(400);
@@ -756,16 +894,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($uri === '/q_run' || $uri === '/q_
 
     qlog("[$debug_id] QID PARSED", compact('q_letter', 'q_type', 'q_uuid', 'q_runnum'));
 
-    if (!ctype_digit((string)$q_runnum)) {
-        qlog("[$debug_id] ERROR", 'Invalid qid number segment');
-        http_response_code(400);
-        echo json_encode([
-            'success' => false,
-            'error'   => 'Invalid qid number segment',
-            'debug'   => $debug_id
-        ]);
-        exit;
-    }
 
     $allowed_types = ['command', 'write', 'manifest', 'status', 'download'];
     if (!in_array($q_type, $allowed_types, true)) {

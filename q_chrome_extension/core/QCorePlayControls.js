@@ -81,6 +81,7 @@
       state.locked = false;
       state.lockedOverride = true;
       state.QMoveToProject = false;
+      state._qid_write_mvp_ran = false;
       window?.QCoreContent?.getState(state);
       state.lockedOverride = null;
       window?.QCoreContent?.getState(state)

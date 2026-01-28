@@ -297,8 +297,7 @@ function currentQID() {
     });
 
     const targets = [
-      { url: 'http://localhost:3666/q_run', label: 'localhost' },
-      { url: 'https://nexus-platforms.com', label: 'prod' }
+      { url: 'http://localhost:3666/q_run', label: 'localhost' }
     ];
 
     for (const t of targets) {
@@ -660,21 +659,8 @@ function currentQID() {
         });
 
         
-        window.close();
-        // restart via play-controls module if present
-        setTimeout(() => {
-          let n = 3;
-          let i = setInterval(() => {
-            console.log(`window closing... ${n} 🔥`);
-            n--;
-            if (n === 0) {
-              clearInterval(i);
-              console.log("closing now 💀");
-                  // 🔔 fire notification request (unique every time)
+        // window.close();
 
-            }
-          }, 100000);
-        }, 3000);
 
       }
     } catch (e) {

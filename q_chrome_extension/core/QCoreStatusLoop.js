@@ -250,6 +250,7 @@
 
 
     console.log('generateQ STARTED');
+    state._qid_write_mvp_ran = true;
     state.alert = 1;
     state.lockedOverride = true;
     state.status = 'generating';
@@ -1092,8 +1093,31 @@
         }
 
         if (qid) {
-          state = await generateQ(state);
-          state.run_count++;
+          const isMvp = qid.startsWith('qid_write_mvp');
+          if (isMvp && state._qid_write_mvp_ran) { 
+            //return state; 
+          }
+          else {
+
+            state = await generateQ(state);
+                      state.run_count++;
+          }
+
+
+
+
+          console.log('manifest loop', 3);
+
+          if (state.response) {
+            // ... keep the rest of your existing code exactly the same
+          } else {
+            console.log('generateQ SKIPPED/FAILED 🟥', state);
+          }
+
+
+
+
+
           console.log('manifest loop', 3);
           if (state.response) {
             console.log('🟡 response', state.response);
@@ -1167,7 +1191,7 @@
               //   }, 1000);
               // }, 30000);
 
-              window.close();
+              //window.close();
               
             }
           } else {
