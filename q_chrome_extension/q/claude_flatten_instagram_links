@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+
+INPUT="database_claude.json"
+
+# find next available filename
+base="q_scrape_claude_"
+n=1
+while :; do
+  fname=$(printf "%s%010d.json" "$base" "$n")
+  [ -e "$fname" ] || break
+  n=$((n+1))
+done
+
+# generate JSON array, save to file, and print to terminal
+jq '
+  .items
+  | flatten
+  | map(select(type == "string" and startswith("https://www.instagram.com/")))
+  | unique
+' "$INPUT" | tee "$fname"
+
+echo
+echo "Saved to $fname"

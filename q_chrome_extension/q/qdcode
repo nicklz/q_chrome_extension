@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -x
+echo "INITIATING DEPLOYMENT TO NEXUS 🛰️"
+
+
+
+# FIRST: run your working command EXACTLY as-is
+sshpass -p "$(awk -F= '/^PASSWORD=/{print $2}' ~/sites/waypoints/nexus/scripts/q_chrome_extension/.env)" \
+  ssh -o StrictHostKeyChecking=no www-data@52.8.111.176 \
+  "pkill screen 2>/dev/null || true; screen -dmS nexus bash -ic 'echo skynet activated; gitpp; exec bash'; exit" \
+  && echo "SUCCESS 💹"

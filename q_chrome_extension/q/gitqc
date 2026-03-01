@@ -1,7 +1,7 @@
 #!/bin/bash
 
 
-cd /home/nick/sites/waypoints && gitq && cd ~/rp4 && gitp && cd /home/nick/sites/waypoints/nexus/scripts/ReadyPlayerFour
+cd /home/nexus/sites/waypoints && gitq && cd ~/rp4 && gitp && cd /home/nexus/sites/waypoints/nexus/scripts/ReadyPlayerFour
 
 echo "BUILD COMPLETE - CHECK UNITY" | lolcat
 
@@ -15,7 +15,7 @@ echo "BUILD COMPLETE - CHECK UNITY" | lolcat
 
 # # Stop UnrealEditor process
 # echo 'powershell.exe Stop-Process -Name "UnrealEditor"' | lolcat
-# powershell.exe Stop-Process -Name "UnrealEditor"  > /home/nick/sites/waypoints/nexus/scripts/ReadyPlayerFour/logs/gitqc.log
+# powershell.exe Stop-Process -Name "UnrealEditor"  > /home/nexus/sites/waypoints/nexus/scripts/ReadyPlayerFour/logs/gitqc.log
 # # Compile with Git and Make
 # echo "gitqc [Compile]" | lolcat
 # cd ~/sites/waypoints && gitq
@@ -30,11 +30,11 @@ echo "BUILD COMPLETE - CHECK UNITY" | lolcat
 #     exit 1
 # fi
 
-# cd /home/nick/sites/waypoints/nexus/scripts/ReadyPlayerFour/
-# make rebuild > /home/nick/sites/waypoints/nexus/q/q.log
+# cd /home/nexus/sites/waypoints/nexus/scripts/ReadyPlayerFour/
+# make rebuild > /home/nexus/sites/waypoints/nexus/q/q.log
 # if [ $? -ne 0 ]; then
 #     echo "🔴🔴🔴 ERROR 🔴🔴🔴 - make rebuild failed"
-#     cat /home/nick/sites/waypoints/nexus/q/q.log
+#     cat /home/nexus/sites/waypoints/nexus/q/q.log
 #     exit 1
 # fi
 

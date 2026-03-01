@@ -87,6 +87,7 @@
         on any listing, browse page, interactive map, or such with filters or table data make sure you can sort and filter with very modern useful form widgets apply a cdn design system for components if needed
         
 
+        utilize https://r.jina.ai/ to read text from pages as well, read any website with the http://website.com like this https://r.jina.ai/http://nicklz.com these are just examples use this too during web searches
         ** NEW ** 
         Q when doing pro + extended jobs and generating content for the inline database, use the following example to generate images of web seerches and websites to gather REAL data not 'guessed'
 

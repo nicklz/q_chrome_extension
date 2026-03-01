@@ -9,71 +9,150 @@ window.HEARTBEAT        = 2000;
 //console.log('[Q] QCoreSkynet.js LOADED', window)
 
 
-// ---- Minimal bootstrap container ----
 (function ensureRoot() {
-  if (!document.getElementById('skynet-container')) {
+  const ID = 'skynet-container';
+
+  function inject() {
+    if (document.getElementById(ID)) return;
+
     const container = document.createElement('div');
-    container.id = 'skynet-container';
-    const menu = document.createElement('div'); menu.id = 'menu';
-    const main = document.createElement('div'); main.id = 'main-content';
-    container.appendChild(menu); container.appendChild(main);
+    container.id = ID;
+
+    const menu = document.createElement('div');
+    menu.id = 'menu';
+
+    const main = document.createElement('div');
+    main.id = 'main-content';
+
+    container.appendChild(menu);
+    container.appendChild(main);
+
     document.body.appendChild(container);
+  }
+
+  function ensureInBody() {
+    const el = document.getElementById(ID);
+    if (el && el.parentElement !== document.body) {
+      document.body.appendChild(el);
+    }
+  }
+
+  function start() {
+    inject();
+    ensureInBody();
+
+    // React/Reddit protection
+    new MutationObserver(() => {
+      ensureInBody();
+    }).observe(document.body, { childList: true });
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', start);
+  } else {
+    start();
   }
 })();
 
+
 // ---- Body classes / title (keep your behavior) ----
-(function hydrateBody() {
-  const state = window?.QCoreContent?.getState();
+function hydrateBody() {
+  let state = window?.QCoreContent?.getState();
+  if (!state) {
+    state = { status: 'paused', events: [], tickets: [] }
+  }
+  console.log(state);
   if (!document.documentElement.classList.contains('nexus-platforms')) {
     document.documentElement.classList.add('nexus-platforms');
   }
+    const rawUrl = window.location.href.toLowerCase();
+  
+    const cleanUrl = rawUrl.split("#")[0].split("?")[0];
+      // Extract hostname
+    let hostname = new URL(cleanUrl).hostname;
+
+    // Strip leading www.
+    hostname = hostname.replace(/^www\./, "");
+
+    // Flatten
+    const applicationName = hostname.replace(/\./g, "");
+
+    console.log("HEY", applicationName);
+    state.application = applicationName;
+    state.applicationName = applicationName;
+    window?.QCoreContent?.setState(state)
+
+
   const classes = Array.from(document.body.classList).filter(c => !/^nexus-/.test(c));
   classes.push(
-    `nexus-application-${state.application || 'unknown'}`,
+    `nexus-application-${state.applicationName || 'unknown'}`,
     `nexus-status-${state.status || 'paused'}`,
     `nexus-mute-${!!state.mute}`,
     `nexus-alert-${state.alert || 0}`,
     `nexus-debug-${!!state.debug}`
   );
   document.body.className = classes.join(' ');
-})();
+};
 
 
 
 // Build menu (kept async SVG fetch)
+// NOTE: Click actions are bound by QCoreInit (core/QCoreInit.js).
+// This file only renders the menu buttons to avoid double-binding (which can start Automate twice).
 (async function buildMenu() {
-    // ---- Menu: now delegates into QCore* plugins ---- 
-    const menuIcons = [
-        { emoji: '🤖', icon: null,                         title: 'Tools',          action: () => window.QCoreToolsModal?.showToolsModal() },
-        {                 icon: 'images/terminal.svg',     title: 'Generate Manifest',       action: () => window.QCoreTerminalModal?.showTerminalModal() },
-        {                 icon: 'images/new.svg',          title: 'Create MVP',            action: () => window.QCoreMVPModal?.showMVPModal() },
-        {                 icon: 'images/files.svg',        title: 'Tickets',          action: () => window.QCoreFilesModal?.showFilesModal() },
-        {                 icon: 'images/configuration.svg',title: 'Configuration',  action: () => window.QCoreSettings?.showSettingsModal() },    
-        {                 icon: 'images/documentation.svg',title: 'Documentation',  action: () => window.QCoreDocumentation?.showDocumentationModal() },
-        {                 icon: 'images/automate.svg',     title: 'Automate',       action: () => awaitUser() },                   // optional workflow
-        {                 icon: 'images/play.svg',         title: 'Play',           action: () => window.QCorePlayControls?.playState() },
-        {                 icon: 'images/pause.svg',        title: 'Pause',          action: () => window.QCorePlayControls?.pauseState() },
-        {                 icon: 'images/mute.svg',         title: 'Mute / Hide',           action: () => window.QCorePlayControls?.muteState() },
-        {                 icon: 'images/restart.svg',      title: 'Restart',        action: () => window.QCorePlayControls?.restartAll()},
-    ];
-    
+
+  hydrateBody();
+
+  const bindings = {
+    'menu-tools':                () => window?.QCoreToolsModal?.showToolsModal,
+    'menu-tickets':              () => window?.QCoreFilesModal?.showFilesModal,
+    'menu-create-mvp':           () => window?.QCoreMVPModal?.showMVPModal,
+    'menu-play':                 () => window?.QCorePlayControls?.playState,
+    'menu-pause':                () => window?.QCorePlayControls?.pauseState,
+    'menu-mutehide':             () => window?.QCorePlayControls?.muteState,
+    'menu-restart':              () => window?.QCorePlayControls?.restartAll,
+    'menu-generate-manifest':    () => window?.QCoreManifest?.bootFromManifest,
+    'menu-automate':             () => window?.QCoreSkynet?.awaitUser,
+    'menu-configuration':        () => window?.QCoreSettingsModal?.showSettingsModal,
+    'menu-documentation':        () => window?.QCoreDocumentation?.showDocumentationModal,
+  };
+
+  const menuIcons = [
+    { emoji: '🤖', icon: null, title: 'Tools' },
+    { icon: 'images/terminal.svg', title: 'Generate Manifest' },
+    { icon: 'images/new.svg', title: 'Create MVP' },
+    { icon: 'images/files.svg', title: 'Tickets' },
+    { icon: 'images/configuration.svg', title: 'Configuration' },
+    { icon: 'images/documentation.svg', title: 'Documentation' },
+    { icon: 'images/automate.svg', title: 'Automate' },
+    { icon: 'images/play.svg', title: 'Play' },
+    { icon: 'images/pause.svg', title: 'Pause' },
+    { icon: 'images/mute.svg', title: 'MuteHide' },
+    { icon: 'images/restart.svg', title: 'Restart' },
+  ];
+
   const menu = document.getElementById('menu');
+  if (!menu) return;
+
   menu.innerHTML = '';
-  for (const { emoji, icon, title, action } of menuIcons) {
+
+  let index = 0;
+
+  for (const { emoji, icon, title } of menuIcons) {
+
     const btn = document.createElement('button');
     btn.title = title;
     btn.className = 'menu-button';
-    btn.id = 'menu-' + title.toLowerCase().replace(/\s+/g, '-').replace(/_/g, '-');
+    btn.id = 'menu-' + title.toLowerCase().replace(/\s+/g, '-');
+
+    btn.disabled = true;
+    btn.dataset.qcoreBind = 'pending';
 
     if (icon) {
       try {
         const svgUrl = chrome.runtime.getURL(icon);
         const res = await fetch(svgUrl);
-        const svg = await res.text();
-        const span = document.createElement('span');
-        span.className = 'menu-icon';
-        span.innerHTML = svg;
-        btn.appendChild(span);
+        btn.innerHTML = await res.text();
       } catch {
         btn.textContent = emoji || '';
       }
@@ -81,86 +160,146 @@ window.HEARTBEAT        = 2000;
       btn.textContent = emoji || '';
     }
 
-    btn.addEventListener('click', action);
+    // Immediate click binding (safe, resolves lazily)
+    btn.addEventListener('click', () => {
+      const getter = bindings[btn.id];
+      if (!getter) return;
+
+      const handler = getter();
+      if (typeof handler === 'function') {
+        handler.call(window);
+      }
+    });
+
     menu.appendChild(btn);
+
+    // ---- Staggered enabling ----
+    const getter = bindings[btn.id];
+
+    if (getter) {
+      const delay = btn.id === 'menu-tools' ? 1000 : index * 100;
+
+      setTimeout(() => {
+        const iv = setInterval(() => {
+          const fn = getter();
+          if (typeof fn === 'function') {
+            btn.disabled = false;
+            btn.dataset.qcoreBind = 'ready';
+            clearInterval(iv);
+          }
+        }, 100);
+      }, delay);
+    }
+
+    index++;
   }
+
 })();
 
-
-
-
-
-// Optional: lightweight awaitUser driver (preserves your entry point; delegates to PromptChunker / PlayControls if needed)
-
+  // === QUEUE INTEGRATION (inline, no external helpers) ===
 
 
     
 async function awaitUser() {
-  console.log('FLAG CHECK')
-  if (checkFlag('flag_1')) {
-      let emoji = getFlag('flag_1');
-      console.log((`Flag 1 ${emoji}`, emoji))
+  // Re-entrancy guard: prevent multiple awaitUser loops (easy to accidentally double-start via duplicate click bindings).
+  if (window.__QCORE_AWAIT_USER_RUNNING) {
+    try { console.warn("[Q] awaitUser already running; ignoring duplicate call."); } catch {}
+    return;
   }
+  window.__QCORE_AWAIT_USER_RUNNING = true;
+  try {
 
-  let allFlags = getAllFlags();
-  allFlags.forEach(flagId => {
-      let emoji = getFlag(flagId);
-      console.log(`Flag ${flagId} TEST: ${emoji}`,emoji);
-  });
+    console.log('FLAG CHECK')
 
-  
-  let selected = null;
-  let state = window?.QCoreContent?.getState();    
 
-  // Get the hostname of the current website
-  let hostname = window.location.hostname;
 
-  // Extract the domain name before ".com" or remove all periods if ".com" is not present
-  let applicationName;
-  if (hostname.includes('.com')) {
-      applicationName = hostname.split('.com')[0].split('.').pop().toLowerCase();
-  } else {
-      applicationName = hostname.replace(/\./g, '').toLowerCase();
-  }
 
-  console.log("HEY", applicationName);
-  // Update the state object
-  state.application = applicationName;
-  console.log('awaitUser STARTED', {})
-  const startTime = Date.now();
-  const timeoutDuration = 7 * 24 * 60 * 60 * 1000; // 7 days in milliseconds
+    let selected = null;
+    let state = window?.QCoreContent?.getState();    
+    // chatgpt.com            → chatgptcom
+    // openai.com             → openaicom
+    // instagram.com          → instagramcom
+    // distrokid.com          → distrokidcom
+    // facebook.com           → facebookcom
+    // blockchain.com         → blockchaincom
+    // virginwifi.com         → virginwificom
+    // google.com             → googlecom
+    // runitbyq.com           → runitbyqcom
+    // zillow.com             → zillowcom
+    // flyfrontier.com        → flyfrontiercom
+    // justice.gov            → justicegov
+    // www.flyfrontier.com    → wwwflyfrontiercom
+    // google.com             → googlecom
+    // claude.ai              → claudeai
+    // grok.com               → grokcom
+    // sora.com               → soracom
+    // sora.chatgpt.com       → sorachatgptcom
+    // suno.com               → sunocom
+    // spotify.com            → spotifycom
 
-  console.log('awaitUser state', state)
-  state.alert = 1;
-  window?.QCoreContent?.setState(state)
-  // Define the sequence of events
-  let events = ['startup'];
+    const rawUrl = window.location.href.toLowerCase();
 
-  if (state.application === 'chatgpt') {
-      events.push('get_response', 'documentation', 'get_response','enter_faas', 'click_run');
-  } else if (state.application === 'sora') {
-      events.push('send_prompt_loop');
-  } else if (state.application === 'suno') {
-      events.push('startup');
-  } else {
-      console.warn('Unknown application. No events to process.', state);
-      return;
-  }
-  
+    // Remove hash + query
+    const cleanUrl = rawUrl.split("#")[0].split("?")[0];
 
-  // Helper function to wait
-  const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+    // Extract hostname
+    let hostname = new URL(cleanUrl).hostname;
 
-  // Initialize the current event index
-  let currentEventIndex = 0;
+    // Strip leading www.
+    hostname = hostname.replace(/^www\./, "");
 
-  while (Date.now() - startTime < timeoutDuration) {
+    // Flatten
+    const applicationName = hostname.replace(/\./g, "");
+
+    console.log("HEY", applicationName);
+    state.application = applicationName;
+
+
+
+    // END //
+
+    console.log('awaitUser STARTED', {})
+    const startTime = Date.now();
+    const timeoutDuration = 7 * 24 * 60 * 60 * 1000; // 7 days in milliseconds
+
+    console.log('awaitUser state', state)
+    state.alert = 1;
+    window?.QCoreContent?.setState(state)
+
+
+    // Define the sequence of events
+    let events = ['startup'];
+    console.log('state.application !!!!!!!!!!!!!!!!!!!', state.application)
+    if (state.application === 'chatgptcom') {
+        events.push('send_prompt_loop_chatgpt');
+    } else if (state.application === 'soracom' || state.application === 'sorachatgptcom') {
+        events.push('send_prompt_loop_sora');
+    } else if (state.application === 'grokcom') {
+        events.push('send_prompt_loop_grok');
+    } else if (state.application === 'claudeai') {
+        events.push('send_prompt_loop_claude');
+    } else if (state.application === 'sunocom') {
+        events.push('startup');
+    } else {
+        console.warn('Unknown application. No events to process.', state);
+        return;
+    }
+    
+
+    // Helper function to wait
+    const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+    // Initialize the current event index
+    let currentEventIndex = 0;
+
+    while (Date.now() - startTime < timeoutDuration) {
 
       // Load the current state from localStorage
-      state = JSON.parse(localStorage.getItem('state')) || { status: 'paused', events: [] };
+      state = window?.QCoreContent?.getState();    
       console.log('awaitUser LOOP INDEX:' + currentEventIndex, state)
       if (state.status === 'play' || state.status === 'analysis' || state.status === 'idle' && state.locked !== true) {
-          console.log('Running...');
+          console.log('Initializing...');
+          console.log('Running Install..')
 
           if (currentEventIndex >= events.length) {
               currentEventIndex = 1; // Loop back to 'enter_faas' and 'click_run'
@@ -170,13 +309,10 @@ async function awaitUser() {
           console.log(`Processing event: ${currentEvent}`);
 
           if (currentEvent === 'startup') {
-              console.log('Startup event completed.');
+
               console.log('Clear old events');
-
-              console.log('GETTING DOCUMENTATION')
-
-
               currentEventIndex++;
+              console.log('Startup event completed.');
           }
 
           if (currentEvent === 'documentation') {
@@ -238,56 +374,161 @@ async function awaitUser() {
           }
 
           if (currentEvent === 'get_response') {
-              if (!state.response) {
                   let response = await window?.QCorePromptChunker?.getResponse();
                   state.response = response;
                   window?.QCoreContent?.setState(state);
                   console.log(`getResponse: ${response}`);
                   currentEventIndex++;
-              } else {
-                  console.log('No response found in state. Skipping... [get_response]', [state, selected]);
-                  let response = await window?.QCorePromptChunker?.getResponse();
-                  console.log('wait', response)
-                  currentEventIndex++;
-              }
           }
+                    
+        if (currentEvent === "send_prompt_loop_grok") {
+            //
+            if (!document.querySelector('[aria-label="Stop model response"]')) {
+                await wait(1000);
+                let ticket = window?.QCoreStatusLoop?.getActiveTicket(state);
+                window?.QCorePromptChunker?.sendPrompt(ticket.description);
+                await wait(10000);
+            }
 
-          if (currentEvent === "send_prompt_loop") {
+
+
+        }
+
+
+            if (currentEvent === "send_prompt_loop_chatgpt") {
+console.log(currentEvent, 'START');
+            if (typeof Array.from(document.querySelectorAll('button')).find(b => b.textContent.trim().toLowerCase() === 'stop') === 'undefined' && typeof [...document.querySelectorAll('button')].find(btn => btn.textContent.trim() === 'Answer now') === 'undefined') {
+                            console.log(currentEvent, 'STOP FOUND WAIT 1 SECOND');
+              await wait(Math.floor(20000 + Math.random() * 1000));
+              if (typeof Array.from(document.querySelectorAll('button')).find(b => b.textContent.trim().toLowerCase() === 'stop') === 'undefined' && typeof [...document.querySelectorAll('button')].find(btn => btn.textContent.trim() === 'Answer now') === 'undefined') {
+
+              if (typeof !document.querySelector('[data-testid="stop-button"]')) {
+                
+
+                
+              console.log(currentEvent);
+                await wait(1000 + Math.random() * 1000);
+                let ticket = window?.QCoreStatusLoop?.getActiveTicket(state);
+                window?.QCorePromptChunker?.sendPrompt(ticket.description);
+                await wait(10000);
+              }
+              else {
+                console.log(currentEvent, 'STOP FOUND SKIP SECOND LAYER');
+              }
+
+            }
+            else {
+              console.log(currentEvent, 'STOP FOUND SKIP');
+            }
+
+            }
+
+
+        }
+        else {
+          console.log(currentEvent, 'FAIL');
+        }
+                            
+        if (currentEvent === "send_prompt_loop_claude") {
+            //
+            if (!document.querySelector('[aria-label="Stop model response"]')) {
+                await wait(1000);
+                let ticket = window?.QCoreStatusLoop?.getActiveTicket(state);
+                window?.QCorePromptChunker?.sendPrompt(ticket.description);
+                await wait(10000);
+            }
+
+
+
+        }
+
+
+
+          if (currentEvent === "send_prompt_loop_sora") {
               console.log("Starting Sora prompt loop...");
               
-              let promptTextarea = document.querySelector(".pointer-events-none textarea");
+              let promptTextarea = document.querySelector("textarea");
 
               if (!promptTextarea) {
                   promptTextarea = document.querySelector('textarea[placeholder^="Describe"]');
               }
-              let createVideoButton = Array.from(document.querySelectorAll('button'))
-                  .find(button => button.textContent.trim() === "Create") ||
-                  Array.from(document.querySelectorAll('button'))
-                  .find(button => button.textContent.trim() === "Remix");
+       
+              let ticket = JSON.stringify(window?.QCoreStatusLoop?.getActiveTicket(state).description);
 
+              promptTextarea.value = ticket;
+              
+              const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-              console.log('createVideoButton', createVideoButton)
-              if (!promptTextarea || !createVideoButton) {
-                  console.error("Required elements not found. Exiting...");
-                  return;
-              }
-      
-              if (!createVideoButton.disabled) {
-                  console.log("Populating prompt...");
-                  promptTextarea.value = state.prompt;
-                  promptTextarea.dispatchEvent(new Event("input", { bubbles: true }));
-      
-                  setTimeout(() => {
-                      console.log('Clicking "Create video" button...');
-                      createVideoButton.click();
-      
-                      setTimeout(() => {
-                          console.log('"Create video" clicked successfully.');
-                      }, 1000);
-                  }, 1000);
-              } else {
-                  console.warn('"Create video" button is disabled. Exiting...');
-              }
+(async () => {
+  if (!promptTextarea) return;
+
+  const nativeSetter = Object.getOwnPropertyDescriptor(
+    window.HTMLTextAreaElement.prototype,
+    "value"
+  ).set;
+
+  // 1️⃣ First click (human focus intent)
+  promptTextarea.click();
+  promptTextarea.focus();
+  await sleep(120);
+
+  // 2️⃣ Set value using native setter (important for React/Vue/etc)
+  nativeSetter.call(promptTextarea, ticket);
+  promptTextarea.dispatchEvent(new Event("input", { bubbles: true }));
+  await sleep(120);
+
+  // 3️⃣ Click again (reinforce focus like human adjusting cursor)
+  promptTextarea.click();
+  promptTextarea.focus();
+  await sleep(100);
+
+  // 4️⃣ Simulate pressing Space key (keydown → keypress → keyup)
+  const spaceDown = new KeyboardEvent("keydown", {
+    key: " ",
+    code: "Space",
+    keyCode: 32,
+    which: 32,
+    bubbles: true
+  });
+
+  const spacePress = new KeyboardEvent("keypress", {
+    key: " ",
+    code: "Space",
+    keyCode: 32,
+    which: 32,
+    bubbles: true
+  });
+
+  const spaceUp = new KeyboardEvent("keyup", {
+    key: " ",
+    code: "Space",
+    keyCode: 32,
+    which: 32,
+    bubbles: true
+  });
+
+  promptTextarea.dispatchEvent(spaceDown);
+  promptTextarea.dispatchEvent(spacePress);
+  promptTextarea.dispatchEvent(spaceUp);
+
+  await sleep(80);
+
+  // 5️⃣ Remove trailing space (optional cleanup so value stays exact)
+  nativeSetter.call(promptTextarea, promptTextarea.value.trimEnd());
+  promptTextarea.dispatchEvent(new Event("input", { bubbles: true }));
+})();
+
+              document.querySelectorAll('button').forEach(btn => {
+                const label = btn.querySelector('.sr-only')?.textContent?.trim();
+                
+                if (label === "Create video") {
+                    const isDisabled = btn.hasAttribute('disabled') || btn.getAttribute('data-disabled') === "true";
+                    const isClickable = !isDisabled;
+
+                    console.log("Create video button clickable:", isClickable);
+                    btn.click();
+                }
+                });
           }
 
           if (currentEvent === 'enter_faas') {
@@ -305,12 +546,6 @@ async function awaitUser() {
               currentEventIndex++;
           }
 
-          if (currentEvent === 'regenerate_prompt') {
-
-              window.QCoreDocumentation?.regeneratePrompt()();
-              console.log(`regeneratePrompt`);
-              currentEventIndex++;
-          }
           if (currentEvent === 'click_run') {
             let currentState = window?.QCoreContent?.getState();
         
@@ -377,6 +612,9 @@ async function awaitUser() {
   localStorage.setItem('state', JSON.stringify(finalState));
 
   console.warn('AwaitUser finished copletely.');
+  } finally {
+    window.__QCORE_AWAIT_USER_RUNNING = false;
+  }
 }
 
   // ---------- Export ----------
@@ -385,6 +623,3 @@ async function awaitUser() {
   };
 
 
-
-
-// ---- Done. Everything else (People Manager, Tools, Files, Tickets, Status, Prompt chunking, Queue I/O) lives in plugins/*.js ----

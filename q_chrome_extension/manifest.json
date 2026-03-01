@@ -14,8 +14,7 @@
       "16": "images/icon16.png",
       "48": "images/icon48.png",
       "128": "images/icon128.png"
-    },
-    "default_popup": "popup.html"
+    }
   },
   "background": {
     "service_worker": "background.js"
@@ -23,12 +22,13 @@
   "permissions": [
     "activeTab",
     "windows",
+    "cookies",
     "scripting",
     "notifications",
     "storage",
     "tabs"
   ],
-  "host_permissions": ["*://*/*"],
+  "host_permissions": ["<all_urls>"],
   "web_accessible_resources": [
     {
       "resources": [
@@ -40,15 +40,56 @@
       "matches": ["*://*/*"]
     }
   ],
-  "content_scripts": [
-    {
-      "matches": ["*://*/*"],
-      "css": ["styles.css"],
-      "js": ["core/QCoreContent.js"],
-      "all_frames": false,
-      "run_at": "document_start"
-    }
-  ],
+"content_scripts": [
+  {
+    "matches": ["*://*/*"],
+    "css": ["styles.css"],
+    "js": [
+
+      "core/QCoreContent.js",
+      "core/QCoreInit.js",
+      "core/QCoreSkynet.js",
+      "core/QCoreGlobal.js",
+      "core/QCoreModalBase.js",
+
+      "plugins/QCoreToolsModal.js",
+
+      "plugins/QCoreToolsAIConnection.js",
+      "plugins/QCoreToolsAmazon.js",
+      "plugins/QCoreToolsChatGPT.js",
+      "plugins/QCoreToolsClaude.js",
+      "plugins/QCoreToolsDashboardPanel.js",
+      "plugins/QCoreToolsEpstein.js",
+      "plugins/QCoreToolsFacebook.js",
+      
+      "plugins/QCoreToolsFrontier.js",
+      "plugins/QCoreToolsGoogleFlights.js",
+      "plugins/QCoreToolsGrok.js",
+      "plugins/QCoreToolsLinkedIn.js",
+      "plugins/QCoreToolsPeopleManager.js",
+      "plugins/QCoreToolsReddit.js",
+      "plugins/QCoreToolsSuno.js",
+      "plugins/QCoreToolsZillow.js",
+
+      "core/QCoreFilesModal.js",
+      "core/QCoreTicketModal.js",
+      "core/QCoreTerminalModal.js",
+      "core/QCoreSettingsModal.js",
+      "core/QCoreManifest.js",
+      "core/QCoreDocumentation.js",
+      "core/QCoreMVPModal.js",
+
+      "core/QCorePlayControls.js",
+      "core/QCorePromptChunker.js",
+      "core/QCoreQueueClient.js",
+      "core/QCoreStatusLoop.js",
+      "core/QCoreStatusPanel.js"
+    ],
+    "all_frames": false,
+    "run_at": "document_idle"
+  }
+],
+
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'none'; base-uri 'self';"
   }

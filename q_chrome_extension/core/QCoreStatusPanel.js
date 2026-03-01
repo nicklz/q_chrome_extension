@@ -41,7 +41,8 @@
       const tkLen = (state?.tickets && typeof state.tickets === 'object') ? Object.keys(state.tickets).length : 0;
       const qRow = document.createElement('div'); qRow.textContent = `Queue: ${qLen}`;
       const tRow = document.createElement('div'); tRow.textContent = `Tickets: ${tkLen}`;
-      root.append(qRow, tRow); panel.appendChild(root);
+      const sRow = document.createElement('div'); tRow.textContent = `Status: ${state.status}`;
+      root.append(qRow, tRow, sRow); panel.appendChild(root);
     }
   
     async function updateStatus(state) {
@@ -54,28 +55,28 @@
       }
 
     
-      try {
-        const res = await fetch('http://localhost:3666/status', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ qid, state })
-        });
-        if (state.debug) {  
-          console.log('[Q] updateStatus: POST [qid, snap]', [qid, state]);
-        }
+      // try {
+      //   const res = await fetch('http://localhost:3666/status', {
+      //     method: 'POST',
+      //     headers: { 'Content-Type': 'application/json' },
+      //     body: JSON.stringify({ qid, state })
+      //   });
+      //   if (state.debug) {  
+      //     console.log('[Q] updateStatus: POST [qid, snap]', [qid, state]);
+      //   }
         
-        const data = await res.json().catch(() => null);
-        if (state.debug) {
-          console.log('[Q] 🟢 updateStatus: POST success ', { status: res.status, ok: res.ok, data });
-        }
+      //   const data = await res.json().catch(() => null);
+      //   if (state.debug) {
+      //     console.log('[Q] 🟢 updateStatus: POST success ', { status: res.status, ok: res.ok, data });
+      //   }
     
-        paintLabel(state, false);
+      //   paintLabel(state, false);
     
-      } catch (err) {
-        console.error('[Q] updateStatus: POST failed [err, qid, snap]', [err, qid, state]);
-        paintLabel(state, true);
-        console.log('[Q] updateStatus: after paintLabel(success=true)');
-      }
+      // } catch (err) {
+      //   console.error('[Q] updateStatus: POST failed [err, qid, snap]', [err, qid, state]);
+      //   paintLabel(state, true);
+      //   console.log('[Q] updateStatus: after paintLabel(success=true)');
+      // }
     
       buildPanel(state);
     }

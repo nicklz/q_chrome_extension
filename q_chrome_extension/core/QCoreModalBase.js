@@ -98,6 +98,7 @@
   if (window.QCoreModalBase) return;
 
   function showModal(title, contentBuilder) {
+    console.log(title, contentBuilder);
     const existing = document.querySelector('.nexus-modal');
     if (existing) existing.remove();
 

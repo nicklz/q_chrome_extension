@@ -144,24 +144,73 @@
   const TOKEN_MAX = 150000;
   const TOKEN_OVERMAX = 100001;
 
-  function findSendBtn() { return document.querySelector('button[data-testid="send-button"]'); }
+  function findSendBtn(applicationName) { 
+  
+      if (applicationName === 'grokcom') {
+        return document.querySelector('button[aria-label="Submit"]');
+      }
+      
+      if (applicationName === 'claudeai') {
+        return document.querySelector('[aria-label="Send message"]');
+      }
+
+      console.log('SEND11111111111', document.querySelectorAll('button[aria-label="Submit"]')[0])
+
+      return document.querySelector('#composer-submit-button');
+
+      
+  
+  }
+
+
+      /**
+     * Extract application name from hostname
+     * - If hostname has a 2-3 character TLD (.com, .ai, .pro, etc.), remove it and take the last segment
+     * - Otherwise, remove all dots from the hostname
+     * Examples: chat.openai.com → openai, claude.ai → claude, localhost → localhost
+     */
 
   function sendPrompt(prompt) {
+    console.log('🟩 sendPrompt',prompt)
+    const rawUrl = window.location.href.toLowerCase();
+  
+    const cleanUrl = rawUrl.split("#")[0].split("?")[0];
+      // Extract hostname
+    let hostname = new URL(cleanUrl).hostname;
 
-    if (!!document.querySelector('[data-testid="screen-threadFlyOut"]')) {
-      console.log('🟨🟨🟨🟨🟨🟨🟨🟨 SEND PROMPT BLOCKED threadFlyOut: ', prompt);
-      return;
-    }
-    console.log('🔵🔵🔵🔵🔵🔵🔵🔵 SEND PROMPT: ', prompt);
-    const ta = document.querySelector('#prompt-textarea');
-    
-    if (!ta) return;
-    ta.textContent = prompt;
-    setTimeout(() => findSendBtn()?.click(), 500);
+    // Strip leading www.
+    hostname = hostname.replace(/^www\./, "");
+
+    // Flatten
+    let applicationName = hostname.replace(/\./g, "");
+
+
+
+  switch (applicationName) {
+    case 'grokcom':
+      prompt_input = document.querySelector('form .tiptap');
+      break;
+    case 'claudeai':
+      prompt_input = document.querySelector('[data-testid="chat-input"]')
+      break;
+    default:
+      if (document.querySelector('p.placeholder')) {
+        prompt_input = document.querySelector('p.placeholder');
+      }
+      else {
+        prompt_input = document.querySelector('#prompt-textarea p');
+      }
+      
+      break;
+  }
+
+    prompt_input.textContent = prompt;
+    setTimeout(() => findSendBtn(applicationName)?.click(), 2000);
   }
 
   async function getResponse() {
-    console.log('getResponse FIRED');
+    let state = window?.QCoreContent?.getState()
+    console.log('getResponse FIRED', state);
 
     // Wait until the submit/stop button is NOT present (generation finished)
     while (document.querySelector('#composer-submit-button')) {
@@ -175,14 +224,59 @@
     // --- pause before extracting text ---
     await new Promise(r => setTimeout(r, 1000));
 
-    let text = document.querySelectorAll('article')[
-      document.querySelectorAll('article').length - 1
-    ].textContent;
+    let nodes = [];
+    if (window.location.hostname === "sora.chatgpt.com") {
+      return null;
+    }
+
+
+    else {
+      document.querySelector('#prompt-textarea p')
+    }
+    let text = '';
+    switch (state.application) {
+      case 'grokcom':
+        nodes = document.querySelectorAll('.response-content-markdown.markdown');
+
+        let text_array = [];
+
+        nodes.forEach(node => {
+          text_array.push(node.textContent);
+        });
+
+        text = JSON.stringify(text_array);
+
+        console.log(text);
+        break;
+
+      case 'claudeai':
+        text = document.querySelectorAll('article')[
+          document.querySelectorAll('article').length - 1
+        ].textContent;
+        break;
+
+      default:
+        nodes = document.querySelectorAll('[data-message-author-role="assistant"]');
+
+        const messages = [];
+
+        nodes.forEach(node => {
+          const content = node.textContent?.trim();
+          if (content) {
+            messages.push(content);
+          }
+        });
+
+        // convert to JSON string
+        text = JSON.stringify(messages);
+        break;
+    }
+
 
     // --- pause after extracting text ---
     await new Promise(r => setTimeout(r, 1000));
 
-    console.log('getResponse RAW text', text);
+    console.log('🟡 getResponse RAW text must response', text);
 
     return text;
   }

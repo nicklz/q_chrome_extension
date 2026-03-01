@@ -7,23 +7,28 @@
 # - Also applies .dockerignore exclusions if present (best-effort, common patterns).
 # - Always hard-excludes obvious junk: node_modules, .git, dist/build caches, etc.
 # - Prints one line per file:
-#     ✅ <absolute_path> | <KB> KB | <created_or_mtime> | <perm>
+#     ✅ <path> | <KB> KB
+#
+# Args:
+# - lds
+#     → prints absolute paths
+# - lds a
+#     → strips prefix "/home/nexus/sites/waypoints/nexus/scripts" from paths if present
 #
 # Notes:
-# - "Created" time depends on filesystem support; if unavailable, falls back to mtime.
-# - Uses GNU coreutils 'stat' format when available; falls back to BSD stat variants.
+# - Date and permissions have been removed as requested.
 # =====================================================================================
 
 set -u
 
-# --- Config: hard excludes (path fragments / top-level dirs) ---
+# --- Config ---
 HARD_EXCLUDES_REGEX='(^|/)(node_modules|\.git|\.svn|\.hg|\.DS_Store|dist|build|coverage|\.next|\.cache)(/|$)'
+STRIP_PREFIX="/home/nexus/sites/waypoints/nexus/scripts"
 
 # --- Helpers ---
 have_cmd() { command -v "$1" >/dev/null 2>&1; }
 
 abs_path() {
-  # Prefer realpath; fallback to python; fallback to prefix $PWD
   if have_cmd realpath; then
     realpath "$1" 2>/dev/null && return 0
   fi
@@ -36,57 +41,29 @@ PY
   printf "%s/%s\n" "$PWD" "${1#./}"
 }
 
-stat_kb_perm_time() {
-  # Output: "<kb> <perm> <time>"
-  # time = birth if available else mtime, in ISO-ish format if possible.
+stat_kb() {
   local f="$1"
-
-  # GNU stat
   if have_cmd stat && stat -c '%s' "$f" >/dev/null 2>&1; then
-    local bytes perm birth mtime time
+    local bytes
     bytes="$(stat -c '%s' "$f" 2>/dev/null || echo "")"
-    perm="$(stat -c '%A' "$f" 2>/dev/null || echo "?")"
-    birth="$(stat -c '%w' "$f" 2>/dev/null || echo "")"
-    mtime="$(stat -c '%y' "$f" 2>/dev/null || echo "")"
-    time="$birth"
-    if [ -z "$time" ] || [ "$time" = "-" ] || [ "$time" = "?" ]; then time="$mtime"; fi
-    # trim fractional seconds + timezone
-    time="${time%%.*}"
-    time="${time%% +*}"
-    # KB (ceil-ish): (bytes + 1023) / 1024
-    if [[ "${bytes:-}" =~ ^[0-9]+$ ]]; then
-      local kb=$(( (bytes + 1023) / 1024 ))
-      printf "%s %s %s\n" "$kb" "$perm" "$time"
+    if [[ "$bytes" =~ ^[0-9]+$ ]]; then
+      printf "%s\n" $(( (bytes + 1023) / 1024 ))
     else
-      printf "? %s %s\n" "$perm" "$time"
+      printf "?\n"
     fi
-    return 0
+    return
   fi
-
-  # BSD/macOS stat
   if have_cmd stat && stat -f '%z' "$f" >/dev/null 2>&1; then
-    local bytes perm birth mtime time
+    local bytes
     bytes="$(stat -f '%z' "$f" 2>/dev/null || echo "")"
-    perm="$(stat -f '%Sp' "$f" 2>/dev/null || echo "?")"
-    # birthtime (%B seconds since epoch) may be 0; mtime (%m)
-    birth="$(stat -f '%B' "$f" 2>/dev/null || echo "0")"
-    mtime="$(stat -f '%m' "$f" 2>/dev/null || echo "0")"
-    if [[ "$birth" =~ ^[0-9]+$ ]] && [ "$birth" -gt 0 ]; then
-      if have_cmd date; then time="$(date -r "$birth" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo "")"; fi
-    fi
-    if [ -z "${time:-}" ]; then
-      if have_cmd date; then time="$(date -r "$mtime" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo "")"; fi
-    fi
-    if [[ "${bytes:-}" =~ ^[0-9]+$ ]]; then
-      local kb=$(( (bytes + 1023) / 1024 ))
-      printf "%s %s %s\n" "$kb" "$perm" "${time:-?}"
+    if [[ "$bytes" =~ ^[0-9]+$ ]]; then
+      printf "%s\n" $(( (bytes + 1023) / 1024 ))
     else
-      printf "? %s %s\n" "$perm" "${time:-?}"
+      printf "?\n"
     fi
-    return 0
+    return
   fi
-
-  printf "? ? ?\n"
+  printf "?\n"
 }
 
 is_git_repo() {
@@ -94,72 +71,51 @@ is_git_repo() {
 }
 
 dockerignore_to_grepv() {
-  # Best-effort conversion of .dockerignore to a single grep -Ev regex.
-  # Supports:
-  # - blank lines, comments
-  # - simple paths and globs using * and ?
-  # Does NOT fully implement Docker ignore semantics (no negation handling).
   local f=".dockerignore"
   [ -f "$f" ] || return 1
   local rx=""
   while IFS= read -r line; do
-    # strip CR, trim
     line="${line%$'\r'}"
     line="${line#"${line%%[![:space:]]*}"}"
     line="${line%"${line##*[![:space:]]}"}"
     [ -z "$line" ] && continue
     [[ "$line" == \#* ]] && continue
-    [[ "$line" == "!"* ]] && continue  # skip negations (best-effort)
-    # normalize leading "./"
+    [[ "$line" == "!"* ]] && continue
     line="${line#./}"
-    # escape regex special, then unescape globs into regex
     local part="$line"
     part="$(printf "%s" "$part" | sed -e 's/[.[\^$+(){}|\\]/\\&/g')"
     part="$(printf "%s" "$part" | sed -e 's/\*/.*/g' -e 's/\?/./g')"
-    # anchor loosely as path fragment
-    # match either exact path segment or any child under it
     part="(^|/)$part(/|$)"
-    if [ -z "$rx" ]; then rx="$part"; else rx="$rx|$part"; fi
+    rx="${rx:+$rx|}$part"
   done < "$f"
   [ -n "$rx" ] || return 1
   printf "%s\n" "$rx"
 }
 
 emit_files_null_delim() {
-  # Emits file paths (relative) NUL-delimited, ignore-aware.
   if is_git_repo; then
-    # tracked + untracked, honor .gitignore and core excludes
     git ls-files -z -co --exclude-standard 2>/dev/null
-    return 0
+    return
   fi
-
-  # Not a git repo: approximate ignore behavior using find + prune for common junk.
-  # (.gitignore parsing without git is non-trivial; this is a sane fallback.)
   find . \
     -type d \( -name node_modules -o -name .git -o -name dist -o -name build -o -name coverage -o -name .next -o -name .cache \) -prune -false \
     -o -type f -print0 2>/dev/null
 }
 
 main() {
-  local docker_rx=""
-  if [ -f ".dockerignore" ]; then
-    docker_rx="$(dockerignore_to_grepv 2>/dev/null || true)"
+  local strip_mode="false"
+  if [ "${1:-}" = "a" ]; then
+    strip_mode="true"
   fi
 
-  # Collect, filter, sort
-  # - Apply HARD_EXCLUDES
-  # - Apply dockerignore regex if available
-  # - Print formatted metadata
+  local docker_rx=""
+  [ -f ".dockerignore" ] && docker_rx="$(dockerignore_to_grepv 2>/dev/null || true)"
+
   emit_files_null_delim \
     | while IFS= read -r -d '' f; do
-        # normalize leading ./
         f="${f#./}"
         [ -z "$f" ] && continue
-        # hard excludes
-        if printf "%s\n" "$f" | grep -Eq "$HARD_EXCLUDES_REGEX"; then
-          continue
-        fi
-        # dockerignore excludes (best-effort)
+        printf "%s\n" "$f" | grep -Eq "$HARD_EXCLUDES_REGEX" && continue
         if [ -n "$docker_rx" ] && printf "%s\n" "$f" | grep -Eq "$docker_rx"; then
           continue
         fi
@@ -167,10 +123,14 @@ main() {
       done \
     | sort -z \
     | while IFS= read -r -d '' f; do
-        local ap kb perm time
+        local ap kb out
         ap="$(abs_path "./$f")"
-        read -r kb perm time < <(stat_kb_perm_time "./$f")
-        printf "✅ %s | %s KB | %s | %s\n" "$ap" "$kb" "$time" "$perm"
+        if [ "$strip_mode" = "true" ] && [[ "$ap" == "$STRIP_PREFIX"* ]]; then
+          ap="${ap#$STRIP_PREFIX}"
+          ap="${ap#/}"
+        fi
+        kb="$(stat_kb "./$f")"
+        printf "✅ %s | %s KB\n" "$ap" "$kb"
       done
 }
 

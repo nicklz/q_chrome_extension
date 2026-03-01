@@ -1,0 +1,590 @@
+#!/usr/bin/env bash
+set -euo pipefail
+IFS=$'\n\t'
+shopt -s nullglob dotglob
+
+# ============================================================
+# qlargezipmerge (STABLE / LOW-CPU)
+# One command. Args are ignored ("compress" etc won't break it).
+#
+# SOURCE:  ~/public_html
+# OUTPUT:  ~/QBackups/q_compress_XX_TIMESTAMP/
+# STATE:   ~/q_process  (also mirrors to ~/.q_process and ./q_process when possible)
+#
+# Stability-first:
+#   - NO gzip for any file > 1000 MiB (archived individually as .tar)
+#   - default: NO gzip at all (way lower CPU). You can enable gzip for small batches.
+#   - tar errors never kill the whole run; we log failures and keep going.
+#   - partial archives use .partial then rename on success.
+# ============================================================
+
+# ---- paths (HOME only) ----
+ROOT="$HOME/public_html"
+OUT_BASE="$HOME/QBackups"
+OLD_OUT="$HOME/QBackup"   # delete if present
+
+# ---- thresholds (MiB) ----
+SMALL_DIR_MIB="${QLZM_SMALL_DIR_MIB:-500}"          # <= this: archive whole dir
+OVERMAX_MIB="${QLZM_OVERMAX_MIB:-500}"              # files > this: archived individually
+NO_GZIP_OVER_MIB="${QLZM_NO_GZIP_OVER_MIB:-1000}"   # files > this: NEVER gzip
+SMALL_FILE_MIB="${QLZM_SMALL_FILE_MIB:-75}"         # <= this go into batches
+BATCH_GROUPS="${QLZM_BATCH_GROUPS:-3}"              # 3 groups (as requested)
+
+# ---- CPU knobs ----
+GZIP_LEVEL="${QLZM_GZIP_LEVEL:-1}"                  # only used when gzip enabled
+GZIP_SMALL_BATCHES="${QLZM_GZIP_SMALL_BATCHES:-0}"  # 1 => gzip ONLY <=75MiB batches
+PAUSE_BETWEEN_JOBS="${QLZM_PAUSE_BETWEEN_JOBS:-0.15}"  # tiny sleep to avoid CPU spikes
+
+# ---- progress ticker ----
+TICK_SECONDS="${QLZM_TICK_SECONDS:-1}"
+THROUGHPUT_MIB_S="${QLZM_THROUGHPUT_MIB_S:-25}"     # fake estimate only
+
+# ---- state files ----
+PROC_PRIMARY="$HOME/q_process"
+PROC_DOT="$HOME/.q_process"
+PROC_CWD="$(pwd)/q_process"
+
+# ---- gentle runner ----
+RUNNER=(nice -n 19)
+if command -v ionice >/dev/null 2>&1; then
+  RUNNER=(nice -n 19 ionice -c2 -n7)
+fi
+
+# ---- time/logging ----
+ts() { date '+%Y-%m-%d %H:%M:%S'; }
+
+# fd3 is run.log. We also echo to stdout.
+log() {
+  local msg="$*"
+  printf '%s %s\n' "$(ts)" "$msg"
+  printf '%s %s\n' "$(ts)" "$msg" >&3
+}
+
+# du -> MiB (integer)
+dir_mib() {
+  local p="$1"
+  if du -sm "$p" >/dev/null 2>&1; then
+    du -sm "$p" | awk '{print $1+0}'
+  elif du -sk "$p" >/dev/null 2>&1; then
+    local kb
+    kb="$(du -sk "$p" | awk '{print $1+0}')"
+    echo $(( (kb + 1023) / 1024 ))
+  else
+    echo 0
+  fi
+}
+
+# stat -> bytes (GNU or BSD)
+file_bytes() {
+  local p="$1"
+  stat -c '%s' "$p" 2>/dev/null || stat -f '%z' "$p" 2>/dev/null || echo 0
+}
+
+# stable id from a string
+path_id() {
+  local s="$1"
+  printf '%s' "$s" | cksum | awk '{print $1}'
+}
+
+# write state (resume)
+state_write() {
+  local step="$1"
+  step="${step//\'/}"
+
+  cat > "$PROC_PRIMARY" <<EOF2
+RUN_DIR='$RUN_DIR'
+RUN_TS='$RUN_TS'
+STEP='$step'
+EOF2
+
+  # mirror
+  cp -f "$PROC_PRIMARY" "$PROC_DOT" 2>/dev/null || true
+  cp -f "$PROC_PRIMARY" "$PROC_CWD" 2>/dev/null || true
+}
+
+# find next 2-digit prefix (01..)
+next_seq_2d() {
+  local max=0
+  mkdir -p "$OUT_BASE"
+
+  for d in "$OUT_BASE"/q_compress_[0-9][0-9]_*; do
+    [[ -d "$d" ]] || continue
+    local b n
+    b="${d##*/}"                 # q_compress_01_...
+    n="${b#q_compress_}"         # 01_...
+    n="${n%%_*}"                 # 01
+    n="${n#0}"                   # strip one leading 0
+    [[ -z "$n" ]] && n=0
+    [[ "$n" =~ ^[0-9]+$ ]] || continue
+    if (( n > max )); then max=$n; fi
+  done
+
+  echo $(( max + 1 ))
+}
+
+# run a command with 1/sec ticker; command output goes ONLY to run.log (fd3)
+run_with_ticker() {
+  local label="$1"; local bytes_est="$2"; shift 2
+
+  log "────────────────────────────────────────────────────────────"
+  log "START: $label"
+  log "CMD:   $*"
+
+  local start now elapsed est pct
+  start="$(date +%s)"
+
+  est="$(awk -v b="$bytes_est" -v m="$THROUGHPUT_MIB_S" 'BEGIN{e=b/(m*1024*1024); if(e<1)e=1; printf "%.0f", e}')"
+
+  set +e
+  ("$@") >&3 2>&3 &
+  local pid=$!
+
+  while kill -0 "$pid" 2>/dev/null; do
+    now="$(date +%s)"
+    elapsed=$(( now - start ))
+    pct="$(awk -v el="$elapsed" -v est="$est" 'BEGIN{printf "%.2f", (el/est)*100}')"
+    log "TICK:  $label progress=${pct}% elapsed=${elapsed}s est=${est}s"
+    sleep "$TICK_SECONDS"
+  done
+
+  wait "$pid"
+  local rc=$?
+  set -e
+
+  log "END:   $label rc=$rc"
+  return "$rc"
+}
+
+# generic step job: ticker + nonfatal
+run_step_job() {
+  local label="$1"; local bytes_est="$2"; shift 2
+
+  state_write "$label"
+
+  set +e
+  run_with_ticker "$label" "$bytes_est" "$@"
+  local rc=$?
+  set -e
+
+  if (( rc == 0 || rc == 1 )); then
+    log "STEP OK: $label"
+  else
+    log "STEP FAIL: $label rc=$rc (kept going)"
+    printf '%s FAIL rc=%s %s\n' "$(ts)" "$rc" "$label" >> "$FAIL_LOG" 2>/dev/null || true
+  fi
+
+  sleep "$PAUSE_BETWEEN_JOBS" 2>/dev/null || true
+  return 0
+}
+
+# tar job wrapper: never exits the script; returns 0 always.
+# creates archive as .partial then renames if rc is 0 or 1.
+# args: label bytes_est archive_path txt_path tar_command...
+do_tar_job() {
+  local label="$1"; local bytes_est="$2"; local arc="$3"; local txt="$4"; shift 4
+
+  local arc_tmp="${arc}.partial"
+  local txt_tmp="${txt}.partial"
+
+  if [[ -f "$arc" ]]; then
+    log "SKIP exists: $arc"
+    return 0
+  fi
+
+  rm -f "$arc_tmp" "$txt_tmp" 2>/dev/null || true
+
+  # Ensure txt_tmp already exists (caller should fill it)
+  [[ -f "$txt_tmp" ]] || : > "$txt_tmp"
+
+  state_write "$label"
+
+  set +e
+  run_with_ticker "$label" "$bytes_est" "$@"
+  local rc=$?
+  set -e
+
+  # tar exit codes:
+  #  0 = success
+  #  1 = warnings
+  #  2+ = fatal
+  if (( rc == 0 || rc == 1 )); then
+    mv -f "$arc_tmp" "$arc" 2>/dev/null || true
+    mv -f "$txt_tmp" "$txt" 2>/dev/null || true
+    log "OK:    $arc"
+  else
+    log "FAIL:  $label rc=$rc (kept going)"
+    printf '%s FAIL rc=%s %s\n' "$(ts)" "$rc" "$label" >> "$FAIL_LOG" 2>/dev/null || true
+    rm -f "$arc_tmp" "$txt_tmp" 2>/dev/null || true
+  fi
+
+  sleep "$PAUSE_BETWEEN_JOBS" 2>/dev/null || true
+  return 0
+}
+
+# build file lists for a directory in ONE pass:
+# output files are newline lists of RELATIVE paths (relative to ROOT)
+# args: rel_dir scope_id dir_mib
+build_lists_for_dir() {
+  local rel_dir="$1"; local sid="$2"; local dmib="$3"
+
+  local overmax_b=$(( OVERMAX_MIB * 1024 * 1024 ))
+  local small_b=$(( SMALL_FILE_MIB * 1024 * 1024 ))
+
+  local l_over="$RUN_DIR/list_overmax_${sid}.rel"
+  local l_mid="$RUN_DIR/list_mid_${sid}.rel"       # (75..500]
+  local l_small="$RUN_DIR/list_small_${sid}.rel"   # <=75
+
+  # if they exist, reuse
+  if [[ -f "$l_over" && -f "$l_mid" && -f "$l_small" ]]; then
+    log "LISTS reuse: $rel_dir"
+    return 0
+  fi
+
+  local t_over="${l_over}.partial"
+  local t_mid="${l_mid}.partial"
+  local t_small="${l_small}.partial"
+  rm -f "$t_over" "$t_mid" "$t_small" 2>/dev/null || true
+  : > "$t_over"; : > "$t_mid"; : > "$t_small"
+
+  local bytes_est=$(( dmib * 1024 * 1024 ))
+
+  # Use find -printf if available; fallback to stat loop.
+  if (cd "$ROOT" && find . -maxdepth 0 -printf '' >/dev/null 2>&1); then
+    run_step_job "LISTS:$rel_dir" "$bytes_est" \
+      bash -lc "cd \"$ROOT\" && find \"$rel_dir\" -type f -printf '%s\t%p\n' | awk -F'\t' -v omax=$overmax_b -v small=$small_b -v L1=\"$t_over\" -v L2=\"$t_mid\" -v L3=\"$t_small\" '{sz=\$1+0; p=\$2; if(sz>omax){print p >> L1} else if(sz>small){print p >> L2} else {print p >> L3}}'"
+  else
+    state_write "LISTS_FALLBACK:$rel_dir"
+    log "LISTS fallback (no find -printf): $rel_dir"
+
+    set +e
+    (cd "$ROOT" && find "$rel_dir" -type f -print0) >&3 2>&3 \
+      | while IFS= read -r -d '' p; do
+          sz="$(file_bytes "$ROOT/$p")"
+          if (( sz > overmax_b )); then
+            printf '%s\n' "$p" >> "$t_over"
+          elif (( sz > small_b )); then
+            printf '%s\n' "$p" >> "$t_mid"
+          else
+            printf '%s\n' "$p" >> "$t_small"
+          fi
+        done
+    set -e
+  fi
+
+  mv -f "$t_over" "$l_over" 2>/dev/null || true
+  mv -f "$t_mid" "$l_mid" 2>/dev/null || true
+  mv -f "$t_small" "$l_small" 2>/dev/null || true
+
+  log "LISTS built: $rel_dir"
+  log "  overmax(>${OVERMAX_MIB}MiB): $(wc -l < "$l_over" 2>/dev/null || echo 0)"
+  log "  mid(${SMALL_FILE_MIB}-${OVERMAX_MIB}MiB): $(wc -l < "$l_mid" 2>/dev/null || echo 0)"
+  log "  small(<=${SMALL_FILE_MIB}MiB): $(wc -l < "$l_small" 2>/dev/null || echo 0)"
+
+  return 0
+}
+
+# archive one file as .tar (no gzip) ALWAYS.
+archive_one_file() {
+  local rel_file="$1"; local sz_bytes="$2"
+
+  local fid base arc txt
+  fid="$(path_id "$rel_file")"
+
+  base="q_file_${RUN_TS}_${fid}"
+  arc="$RUN_DIR/${base}.tar"
+  txt="$RUN_DIR/${base}.txt"
+
+  : > "${txt}.partial"
+  printf '%s\n' "$ROOT/$rel_file" > "${txt}.partial"
+
+  do_tar_job "FILE:$rel_file" "$sz_bytes" "$arc" "$txt" \
+    env "${RUNNER[@]}" tar -cf "${arc}.partial" \
+      --ignore-failed-read --warning=no-file-changed \
+      -C "$ROOT" "$rel_file"
+}
+
+archive_small_batch() {
+  local sid="$1"; local gname="$2"; local listfile="$3"; local bytes_est="$4"
+
+  [[ -s "$listfile" ]] || { log "BATCH $sid/$gname empty (skip)"; return 0; }
+
+  local base arc txt
+  base="q_batch_${RUN_TS}_${sid}_${gname}"
+
+  if [[ "$GZIP_SMALL_BATCHES" == "1" ]]; then
+    arc="$RUN_DIR/${base}.tar.gz"
+  else
+    arc="$RUN_DIR/${base}.tar"
+  fi
+  txt="$RUN_DIR/${base}.txt"
+
+  : > "${txt}.partial"
+  awk -v p="$ROOT/" '{print p $0}' "$listfile" > "${txt}.partial"
+
+  if [[ "$GZIP_SMALL_BATCHES" == "1" ]]; then
+    do_tar_job "BATCH_GZ:$sid/$gname" "$bytes_est" "$arc" "$txt" \
+      env GZIP=-$GZIP_LEVEL "${RUNNER[@]}" tar -czf "${arc}.partial" \
+        --ignore-failed-read --warning=no-file-changed \
+        -C "$ROOT" -T "$listfile"
+  else
+    do_tar_job "BATCH:$sid/$gname" "$bytes_est" "$arc" "$txt" \
+      env "${RUNNER[@]}" tar -cf "${arc}.partial" \
+        --ignore-failed-read --warning=no-file-changed \
+        -C "$ROOT" -T "$listfile"
+  fi
+}
+
+archive_small_dir_whole() {
+  local rel_dir="$1"; local dmib="$2"
+
+  local did base arc txt
+  did="$(path_id "$rel_dir")"
+  base="q_dir_le${SMALL_DIR_MIB}MiB_${RUN_TS}_${did}"
+
+  # NO gzip by default (CPU). If you want gzip for small dirs, export QLZM_GZIP_SMALL_DIRS=1
+  local gzip_small_dirs="${QLZM_GZIP_SMALL_DIRS:-0}"
+  if [[ "$gzip_small_dirs" == "1" ]]; then
+    arc="$RUN_DIR/${base}.tar.gz"
+  else
+    arc="$RUN_DIR/${base}.tar"
+  fi
+  txt="$RUN_DIR/${base}.txt"
+
+  : > "${txt}.partial"
+  printf '%s\n' "$ROOT/$rel_dir" > "${txt}.partial"
+
+  local bytes_est=$(( dmib * 1024 * 1024 ))
+
+  if [[ "$gzip_small_dirs" == "1" ]]; then
+    do_tar_job "SMALL_DIR_GZ:$rel_dir" "$bytes_est" "$arc" "$txt" \
+      env GZIP=-$GZIP_LEVEL "${RUNNER[@]}" tar -czf "${arc}.partial" \
+        --ignore-failed-read --warning=no-file-changed \
+        -C "$ROOT" "$rel_dir"
+  else
+    do_tar_job "SMALL_DIR:$rel_dir" "$bytes_est" "$arc" "$txt" \
+      env "${RUNNER[@]}" tar -cf "${arc}.partial" \
+        --ignore-failed-read --warning=no-file-changed \
+        -C "$ROOT" "$rel_dir"
+  fi
+}
+
+archive_dir_structure() {
+  local rel_dir="$1"; local sid="$2"; local dmib="$3"
+
+  local list="$RUN_DIR/struct_${sid}.list"
+  local base arc txt
+  base="q_struct_${RUN_TS}_${sid}"
+  arc="$RUN_DIR/${base}.tar"
+  txt="$RUN_DIR/${base}.txt"
+
+  if [[ -f "$arc" ]]; then
+    log "STRUCT skip (exists): $arc"
+    return 0
+  fi
+
+  if [[ ! -f "$list" ]]; then
+    : > "${list}.partial"
+    (cd "$ROOT" && find "$rel_dir" -type d -print 2>/dev/null) >> "${list}.partial" || true
+    (cd "$ROOT" && find "$rel_dir" -type l -print 2>/dev/null) >> "${list}.partial" || true
+    mv -f "${list}.partial" "$list" 2>/dev/null || true
+  fi
+
+  [[ -s "$list" ]] || { log "STRUCT empty list (skip): $rel_dir"; return 0; }
+
+  : > "${txt}.partial"
+  awk -v p="$ROOT/" '{print p $0}' "$list" > "${txt}.partial"
+
+  local bytes_est=$(( dmib * 1024 * 1024 ))
+  do_tar_job "STRUCT:$rel_dir" "$bytes_est" "$arc" "$txt" \
+    env "${RUNNER[@]}" tar -cf "${arc}.partial" \
+      --ignore-failed-read --warning=no-file-changed --no-recursion \
+      -C "$ROOT" -T "$list"
+}
+
+# ---------------- main ----------------
+
+# ignore any args (compress etc)
+if (( $# > 0 )); then
+  :
+fi
+
+mkdir -p "$OUT_BASE"
+rm -rf "$OLD_OUT" 2>/dev/null || true
+
+RUN_DIR=""
+RUN_TS=""
+STEP=""
+
+# load state (resume)
+if [[ -f "$PROC_PRIMARY" ]]; then
+  source "$PROC_PRIMARY" || true
+elif [[ -f "$PROC_DOT" ]]; then
+  source "$PROC_DOT" || true
+elif [[ -f "$PROC_CWD" ]]; then
+  source "$PROC_CWD" || true
+fi
+
+# validate resume
+resume_ok=0
+if [[ -n "${RUN_DIR:-}" && -n "${RUN_TS:-}" && -d "${RUN_DIR:-}" ]]; then
+  case "$RUN_DIR" in
+    "$OUT_BASE"/q_compress_*) resume_ok=1 ;;
+    *) resume_ok=0 ;;
+  esac
+fi
+
+if (( resume_ok == 0 )); then
+  RUN_TS="$(date '+%Y%m%d_%H%M%S')"
+  seq="$(next_seq_2d)"
+  num="$(printf '%02d' "$seq")"
+  RUN_DIR="$OUT_BASE/q_compress_${num}_${RUN_TS}"
+  rm -rf "$RUN_DIR" 2>/dev/null || true
+  mkdir -p "$RUN_DIR"
+fi
+
+# open logs
+RUN_LOG="$RUN_DIR/run.log"
+FAIL_LOG="$RUN_DIR/failures.log"
+mkdir -p "$RUN_DIR"
+: > "$FAIL_LOG" || true
+exec 3>>"$RUN_LOG"
+
+state_write "START"
+log "🧰 qlargezipmerge STABLE/LOW-CPU"
+log "ROOT:    $ROOT"
+log "OUT:     $OUT_BASE"
+log "RUN_DIR: $RUN_DIR"
+log "RUN_TS:  $RUN_TS"
+log "STATE:   $PROC_PRIMARY (mirrors: $PROC_DOT and ./q_process when possible)"
+log "CFG: SMALL_DIR=${SMALL_DIR_MIB}MiB OVERMAX=${OVERMAX_MIB}MiB NO_GZIP_OVER=${NO_GZIP_OVER_MIB}MiB SMALL_FILE=${SMALL_FILE_MIB}MiB"
+log "CFG: GZIP_SMALL_BATCHES=$GZIP_SMALL_BATCHES (0=off) GZIP_LEVEL=$GZIP_LEVEL"
+log "CFG: PAUSE_BETWEEN_JOBS=${PAUSE_BETWEEN_JOBS}s"
+log "RUNNER: ${RUNNER[*]}"
+
+if [[ ! -d "$ROOT" ]]; then
+  log "❌ Missing $ROOT"
+  exit 2
+fi
+
+# cleanup partials from previous crash
+log "CLEANUP: removing any *.partial in $RUN_DIR"
+rm -f "$RUN_DIR"/*.partial 2>/dev/null || true
+
+# ---------- Phase 1: small dirs (<=500MiB) ----------
+state_write "PHASE1_SMALL_DIRS"
+log "PHASE 1: small dirs (<= ${SMALL_DIR_MIB}MiB)"
+
+BIG_LIST="$RUN_DIR/big_dirs.list"
+: > "$BIG_LIST"
+
+# stable order
+TOP_LIST="$RUN_DIR/top_dirs.list"
+: > "$TOP_LIST"
+for d in "$ROOT"/*; do
+  [[ -d "$d" ]] || continue
+  printf '%s\n' "${d##*/}" >> "$TOP_LIST"
+done
+LC_ALL=C sort -u "$TOP_LIST" -o "$TOP_LIST" || true
+
+TOTAL_DIRS="$(wc -l < "$TOP_LIST" 2>/dev/null || echo 0)"
+log "TOP-LEVEL DIRS: $TOTAL_DIRS"
+
+idx=0
+while IFS= read -r rel_dir; do
+  [[ -n "$rel_dir" ]] || continue
+  idx=$((idx + 1))
+  dmib="$(dir_mib "$ROOT/$rel_dir")"
+  log "DIR ${idx}/${TOTAL_DIRS}: $rel_dir size=${dmib}MiB"
+
+  if (( dmib <= SMALL_DIR_MIB )); then
+    archive_small_dir_whole "$rel_dir" "$dmib"
+  else
+    printf '%s\n' "$rel_dir" >> "$BIG_LIST"
+    log "QUEUE BIG: $rel_dir"
+  fi
+done < "$TOP_LIST"
+
+BIG_COUNT="$(wc -l < "$BIG_LIST" 2>/dev/null || echo 0)"
+log "PHASE 1 DONE. Big dirs queued: $BIG_COUNT"
+
+# ---------- Phase 2: big dirs split ----------
+state_write "PHASE2_BIG_DIRS"
+log "PHASE 2: big dirs split (> ${SMALL_DIR_MIB}MiB)"
+
+bidx=0
+while IFS= read -r rel_dir; do
+  [[ -n "$rel_dir" ]] || continue
+  bidx=$((bidx + 1))
+
+  dmib="$(dir_mib "$ROOT/$rel_dir")"
+  sid="$(path_id "$rel_dir")"
+
+  log "BIGDIR ${bidx}/${BIG_COUNT}: $rel_dir size=${dmib}MiB sid=$sid"
+
+  # structure first
+  archive_dir_structure "$rel_dir" "$sid" "$dmib"
+
+  # build lists
+  build_lists_for_dir "$rel_dir" "$sid" "$dmib"
+
+  l_over="$RUN_DIR/list_overmax_${sid}.rel"
+  l_mid="$RUN_DIR/list_mid_${sid}.rel"
+  l_small="$RUN_DIR/list_small_${sid}.rel"
+
+  # overmax: files > 500MiB => individual .tar (no gzip)
+  state_write "BIGDIR_OVERMAX:$rel_dir"
+  log "OVERMAX LOOP: $rel_dir"
+  while IFS= read -r rel_file; do
+    [[ -n "$rel_file" ]] || continue
+    abs="$ROOT/$rel_file"
+    sz="$(file_bytes "$abs")"
+    log "  OVERMAX file: $rel_file bytes=$sz"
+    archive_one_file "$rel_file" "$sz"
+  done < "$l_over"
+
+  # mid: 75..500MiB => individual .tar (no gzip)
+  state_write "BIGDIR_MID:$rel_dir"
+  log "MID LOOP (${SMALL_FILE_MIB}-${OVERMAX_MIB}MiB): $rel_dir"
+  while IFS= read -r rel_file; do
+    [[ -n "$rel_file" ]] || continue
+    abs="$ROOT/$rel_file"
+    sz="$(file_bytes "$abs")"
+    log "  MID file: $rel_file bytes=$sz"
+    archive_one_file "$rel_file" "$sz"
+  done < "$l_mid"
+
+  # small: <=75MiB => 3 batches (sequential for CPU stability)
+  state_write "BIGDIR_SMALL_BATCH:$rel_dir"
+  log "SMALL BATCH LOOP (<=${SMALL_FILE_MIB}MiB): $rel_dir"
+
+  g1="$RUN_DIR/small_${sid}_g1.rel"
+  g2="$RUN_DIR/small_${sid}_g2.rel"
+  g3="$RUN_DIR/small_${sid}_g3.rel"
+  : > "$g1"; : > "$g2"; : > "$g3"
+
+  i=0
+  while IFS= read -r rel_file; do
+    [[ -n "$rel_file" ]] || continue
+    i=$((i + 1))
+    case $(( i % 3 )) in
+      1) printf '%s\n' "$rel_file" >> "$g1" ;;
+      2) printf '%s\n' "$rel_file" >> "$g2" ;;
+      0) printf '%s\n' "$rel_file" >> "$g3" ;;
+    esac
+  done < "$l_small"
+
+  bytes_est=$(( (dmib * 1024 * 1024) / 3 + 1 ))
+
+  archive_small_batch "$sid" "g1" "$g1" "$bytes_est"
+  archive_small_batch "$sid" "g2" "$g2" "$bytes_est"
+  archive_small_batch "$sid" "g3" "$g3" "$bytes_est"
+
+  log "BIGDIR DONE: $rel_dir"
+done < "$BIG_LIST"
+
+state_write "DONE"
+log "🏁 DONE"
+log "RUN_DIR: $RUN_DIR"
+log "run.log: $RUN_LOG"
+log "fails : $FAIL_LOG"
+log "Resume: rerun this script. It reuses RUN_DIR from $PROC_PRIMARY and skips archives that already exist."

@@ -208,9 +208,22 @@
 
   // -------------------- generateQ (provided + integrated) --------------------
   async function generateQ(state) {
+    await new Promise(r => setTimeout(r, 1000));
+    if (!state) {
+      state = window?.QCoreContent?.getState();
+    }
+    
 
 
+    if (document.querySelector('[data-turn="user"]')) {
+      console.log('🟨🟨🟨🟨🟨🟨🟨🟨 generateQ SEND PROMPT BLOCKED threadFlyOut: ', state);
+      return state;
+    }
 
+    if (document.querySelector('[data-testid="screen-threadFlyOut"]')) {
+      console.log('🟨🟨🟨🟨🟨🟨🟨🟨 generateQ SEND PROMPT BLOCKED threadFlyOut: ', state);
+      return state;
+    }
 
 
     let qid = window.QCoreQueueClient.currentQID();
@@ -717,7 +730,8 @@
             
             
           }
-          
+          state.prompt = (state.prompt || "").slice(0, 35000);
+          await new Promise(r => setTimeout(r, 3000));
           window?.QCorePromptChunker?.sendPrompt(state.prompt);
 
 
@@ -844,7 +858,11 @@
 
   // -------------------- Main loop (async, with awaited ops) --------------------
   async function tick(state) {
-
+    
+      const age = document.querySelector('#age-button-yes');
+      const justice = document.querySelector('input[type="button"][value="I am not a robot"]');
+      if (justice) justice.click();
+      //if (age) age.click();
   
   //   if (state.QMoveToProject) {
   //     console.log("WE HERE")

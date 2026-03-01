@@ -1,0 +1,416 @@
+#!/usr/bin/env bash
+# qtop — big live CPU% + MEM% + right-side AVG chart
+# - CPU blue, MEM orange, % green
+# - CPU & MEM shown with TWO decimals (prevents "stuck at 0%" on big/multi-core idle boxes)
+# - Data source: /proc/stat + /proc/meminfo (top-style math)
+# Exit: Q/q or Ctrl+C
+#
+# Usage:
+#   qtop
+#   qtop 0.5
+#   qtop -i 2
+
+set -u
+
+# -----------------------------
+# Args
+# -----------------------------
+INTERVAL_SEC="1"
+if [[ "${1:-}" == "-i" && -n "${2:-}" ]]; then
+  INTERVAL_SEC="$2"
+elif [[ -n "${1:-}" ]]; then
+  INTERVAL_SEC="$1"
+fi
+
+# Clamp interval to sane minimum
+INTERVAL_SEC="$(awk -v s="$INTERVAL_SEC" 'BEGIN{
+  if (s<=0) s=1;
+  if (s<0.1) s=0.1;
+  printf "%.3f\n", s;
+}')"
+
+# -----------------------------
+# Colors
+# -----------------------------
+RESET=$'\033[0m'
+BOLD=$'\033[1m'
+
+COLORS=0
+if command -v tput >/dev/null 2>&1; then
+  COLORS="$(tput colors 2>/dev/null || echo 0)"
+fi
+
+if [[ "$COLORS" -ge 256 ]]; then
+  BLUE=$'\033[38;5;27m'
+  ORANGE=$'\033[38;5;208m'
+  GREEN=$'\033[38;5;46m'
+  DIM=$'\033[38;5;244m'
+  DIM2=$'\033[38;5;240m'
+else
+  BLUE=$'\033[34m'
+  ORANGE=$'\033[33m'
+  GREEN=$'\033[32m'
+  DIM=$'\033[2m'
+  DIM2=$'\033[2m'
+fi
+
+cleanup() {
+  if command -v tput >/dev/null 2>&1; then
+    tput cnorm 2>/dev/null || true
+  fi
+  printf "%b" "${RESET}"
+}
+trap 'cleanup; exit 0' INT TERM
+trap cleanup EXIT
+
+if command -v tput >/dev/null 2>&1; then
+  tput civis 2>/dev/null || true
+fi
+
+# -----------------------------
+# Big font glyphs (7 lines tall)
+# -----------------------------
+GLYPH=()
+glyph_for() {
+  local ch="$1"
+  case "$ch" in
+    'C'|'c') GLYPH=( " █████ " "██   ██" "██     " "██     " "██     " "██   ██" " █████ " ) ;;
+    'P'|'p') GLYPH=( "██████ " "██   ██" "██   ██" "██████ " "██     " "██     " "██     " ) ;;
+    'U'|'u') GLYPH=( "██   ██" "██   ██" "██   ██" "██   ██" "██   ██" "██   ██" " █████ " ) ;;
+    'M'|'m') GLYPH=( "██   ██" "███ ███" "███████" "██ █ ██" "██   ██" "██   ██" "██   ██" ) ;;
+    'E'|'e') GLYPH=( "██████ " "██     " "██     " "█████  " "██     " "██     " "██████ " ) ;;
+    '0') GLYPH=( " █████ " "██   ██" "██  ███" "██ █ ██" "███  ██" "██   ██" " █████ " ) ;;
+    '1') GLYPH=( "   ██  " " ████  " "   ██  " "   ██  " "   ██  " "   ██  " " █████ " ) ;;
+    '2') GLYPH=( " █████ " "██   ██" "     ██" "  ████ " " ██    " "██     " "███████" ) ;;
+    '3') GLYPH=( " █████ " "██   ██" "     ██" "  ████ " "     ██" "██   ██" " █████ " ) ;;
+    '4') GLYPH=( "   ███ " "  ████ " " ██ ██ " "██  ██ " "███████" "    ██ " "    ██ " ) ;;
+    '5') GLYPH=( "███████" "██     " "██████ " "     ██" "     ██" "██   ██" " █████ " ) ;;
+    '6') GLYPH=( " █████ " "██   ██" "██     " "██████ " "██   ██" "██   ██" " █████ " ) ;;
+    '7') GLYPH=( "███████" "     ██" "    ██ " "   ██  " "  ██   " " ██    " "██     " ) ;;
+    '8') GLYPH=( " █████ " "██   ██" "██   ██" " █████ " "██   ██" "██   ██" " █████ " ) ;;
+    '9') GLYPH=( " █████ " "██   ██" "██   ██" " ██████" "     ██" "██   ██" " █████ " ) ;;
+    '%') GLYPH=( "██   ██" "██  ██ " "   ██  " "  ██   " " ██  ██" "██   ██" "       " ) ;;
+    '.') GLYPH=( "       " "       " "       " "       " "       " "   ██  " "   ██  " ) ;;
+    ' ') GLYPH=( "       " "       " "       " "       " "       " "       " "       " ) ;;
+    ':') GLYPH=( "       " "   ██  " "   ██  " "       " "   ██  " "   ██  " "       " ) ;;
+    *)   GLYPH=( "  ???  " "  ???  " "  ???  " "  ???  " "  ???  " "  ???  " "  ???  " ) ;;
+  esac
+}
+
+render_big_lines() {
+  # render_big_lines "TEXT" "BASECOLOR" OUT_ARRAY_NAME
+  local text="$1"
+  local base="$2"
+  local outname="$3"
+
+  local -a out=( "" "" "" "" "" "" "" )
+  local i ch row col
+
+  for ((i=0; i<${#text}; i++)); do
+    ch="${text:i:1}"
+    glyph_for "$ch"
+
+    # big percent sign must be green
+    if [[ "$ch" == "%" ]]; then
+      col="${BOLD}${GREEN}"
+    else
+      col="$base"
+    fi
+
+    for row in {0..6}; do
+      out[$row]+="${col}${GLYPH[$row]}${base} "
+    done
+  done
+
+  eval "$outname=()"
+  for row in {0..6}; do
+    eval "$outname+=(\"\${out[$row]}${RESET}\")"
+  done
+}
+
+# -----------------------------
+# CPU: /proc/stat (top-style sampling)
+# We compute percent in "basis points" (0.01%) = integer 0..10000
+# -----------------------------
+cpu_read_times() {
+  # Output: total idle_all
+  # NOTE: Using pure bash parsing avoids awk integer-width issues and keeps it consistent.
+  local cpu user nice system idle iowait irq softirq steal rest
+  read -r cpu user nice system idle iowait irq softirq steal rest < /proc/stat || return 1
+
+  user=${user:-0}; nice=${nice:-0}; system=${system:-0}
+  idle=${idle:-0}; iowait=${iowait:-0}
+  irq=${irq:-0}; softirq=${softirq:-0}; steal=${steal:-0}
+
+  local idle_all=$(( idle + iowait ))
+  local total=$(( user + nice + system + idle + iowait + irq + softirq + steal ))
+
+  printf "%s %s\n" "$total" "$idle_all"
+}
+
+cpu_basis_points_from_delta() {
+  # args: prev_total prev_idle new_total new_idle
+  local pt="$1" pi="$2" nt="$3" ni="$4"
+  local dt=$(( nt - pt ))
+  local di=$(( ni - pi ))
+
+  if (( dt <= 0 )); then
+    echo 0
+    return 0
+  fi
+
+  local busy=$(( dt - di ))
+  if (( busy < 0 )); then busy=0; fi
+
+  # basis points (0.01%): busy/dt * 10000
+  # rounded: + dt/2
+  local bp=$(( (busy * 10000 + dt/2) / dt ))
+
+  if (( bp < 0 )); then bp=0; fi
+  if (( bp > 10000 )); then bp=10000; fi
+  echo "$bp"
+}
+
+# -----------------------------
+# MEM: /proc/meminfo (top-ish "used" that treats cache as reclaimable)
+# used = MemTotal - MemFree - Buffers - Cached - SReclaimable + Shmem
+# percent shown in basis points (0.01%) like CPU
+# -----------------------------
+mem_basis_points_top_style() {
+  local t=0 f=0 b=0 c=0 sr=0 sh=0
+  local k v unit
+
+  while read -r k v unit; do
+    case "$k" in
+      MemTotal:)     t=$v ;;
+      MemFree:)      f=$v ;;
+      Buffers:)      b=$v ;;
+      Cached:)       c=$v ;;
+      SReclaimable:) sr=$v ;;
+      Shmem:)        sh=$v ;;
+    esac
+
+    # early exit if we have the big ones
+    if (( t>0 )) && [[ "$k" == "Shmem:" ]]; then
+      :
+    fi
+  done < /proc/meminfo
+
+  if (( t <= 0 )); then
+    echo 0
+    return 0
+  fi
+
+  local used=$(( t - f - b - c - sr + sh ))
+  if (( used < 0 )); then used=0; fi
+  if (( used > t )); then used=$t; fi
+
+  local bp=$(( (used * 10000 + t/2) / t ))
+  if (( bp < 0 )); then bp=0; fi
+  if (( bp > 10000 )); then bp=10000; fi
+  echo "$bp"
+}
+
+# -----------------------------
+# Formatting helpers
+# -----------------------------
+format_bp() {
+  # basis points -> "XX.XX" with leading zero for 0-9 (00.00 .. 09.99)
+  local bp="$1"
+  if (( bp < 0 )); then bp=0; fi
+  if (( bp > 10000 )); then bp=10000; fi
+  local ip=$(( bp / 100 ))
+  local dp=$(( bp % 100 ))
+
+  # pad integer part to 2 digits
+  printf "%02d.%02d" "$ip" "$dp"
+}
+
+# -----------------------------
+# Chart (ASCII-safe)
+# plots rolling AVG(CPU,MEM) as a line (points + vertical connectors)
+# -----------------------------
+CHART_H=7
+HIST_MAX=400
+declare -a HIST=()   # integers 0..100 (percent)
+
+term_cols() {
+  local cols="0"
+  if command -v tput >/dev/null 2>&1; then
+    cols="$(tput cols 2>/dev/null || echo 0)"
+  fi
+  if [[ "$cols" =~ ^[0-9]+$ ]] && (( cols > 0 )); then
+    echo "$cols"
+  else
+    echo 120
+  fi
+}
+
+chart_width() {
+  # Estimate left render width: each char ~ 8 columns (7 glyph + 1 space)
+  local left_chars="$1"
+  local cols; cols="$(term_cols)"
+  local left_w=$(( left_chars * 8 + 2 ))
+  local w=$(( cols - left_w - 4 ))
+
+  if (( w < 10 )); then w=10; fi
+  if (( w > 80 )); then w=80; fi
+  echo "$w"
+}
+
+chart_build_lines() {
+  # arg: width
+  local w="$1"
+  local -a grid=()
+  local r c
+
+  # init rows with dots
+  for r in $(seq 0 $((CHART_H-1))); do
+    grid[$r]=""
+    for c in $(seq 1 "$w"); do
+      grid[$r]+="."
+    done
+  done
+
+  local len="${#HIST[@]}"
+  local start=0
+  if (( len > w )); then start=$(( len - w )); fi
+
+  local prev_row="-1"
+  for c in $(seq 0 $((w-1))); do
+    local idx=$(( start + c ))
+    if (( idx >= len )); then
+      continue
+    fi
+
+    local v="${HIST[$idx]}"
+    if (( v < 0 )); then v=0; fi
+    if (( v > 100 )); then v=100; fi
+
+    # map 0..100 -> row (bottom=0, top=100)
+    local row=$(( (100 - v) * (CHART_H - 1) / 100 ))
+    if (( row < 0 )); then row=0; fi
+    if (( row > CHART_H-1 )); then row=$((CHART_H-1)); fi
+
+    # vertical connector from prev_row to row at this column (step-like line)
+    if (( prev_row >= 0 )) && (( prev_row != row )); then
+      local a="$prev_row" b="$row"
+      local lo="$a" hi="$b"
+      if (( lo > hi )); then lo="$b"; hi="$a"; fi
+      local rr
+      for rr in $(seq $((lo+1)) $((hi-1))); do
+        local before="${grid[$rr]:0:$c}"
+        local after="${grid[$rr]:$((c+1))}"
+        grid[$rr]="${before}|${after}"
+      done
+    fi
+
+    # point
+    local before="${grid[$row]:0:$c}"
+    local after="${grid[$row]:$((c+1))}"
+    grid[$row]="${before}*${after}"
+
+    prev_row="$row"
+  done
+
+  CHART_LINES=()
+  for r in $(seq 0 $((CHART_H-1))); do
+    local line="${grid[$r]}"
+    # Colorize: background dots dim, line segments green
+    line="${line//\*/${GREEN}*${DIM2}}"
+    line="${line//|/${GREEN}|${DIM2}}"
+    CHART_LINES+=( "${DIM2}${line}${RESET}" )
+  done
+}
+
+# -----------------------------
+# Draw
+# -----------------------------
+draw() {
+  local cpu_bp="$1" mem_bp="$2"
+
+  local cpu_str mem_str avg_str
+  cpu_str="$(format_bp "$cpu_bp")"
+  mem_str="$(format_bp "$mem_bp")"
+
+  local avg_bp=$(( (cpu_bp + mem_bp) / 2 ))
+  avg_str="$(format_bp "$avg_bp")"
+
+  # chart wants integer 0..100
+  local avg_int=$(( (avg_bp + 50) / 100 ))
+  HIST+=( "$avg_int" )
+  if (( ${#HIST[@]} > HIST_MAX )); then
+    HIST=( "${HIST[@]:$(( ${#HIST[@]} - HIST_MAX ))}" )
+  fi
+
+  local cpu_text="CPU ${cpu_str}%"
+  local mem_text="MEM ${mem_str}%"
+  local left_chars=$(( ${#cpu_text} > ${#mem_text} ? ${#cpu_text} : ${#mem_text} ))
+
+  local w; w="$(chart_width "$left_chars")"
+  chart_build_lines "$w"
+
+  local -a CPU_LINES MEM_LINES
+  render_big_lines "$cpu_text" "${BOLD}${BLUE}" CPU_LINES
+  render_big_lines "$mem_text" "${BOLD}${ORANGE}" MEM_LINES
+
+  printf "\033[2J\033[H"
+
+  # CPU block with chart on the right
+  for i in {0..6}; do
+    printf "%b  %b\n" "${CPU_LINES[$i]}" "${CHART_LINES[$i]}"
+  done
+
+  printf "\n"
+
+  # MEM block with chart on the right (same chart shown alongside for symmetry)
+  for i in {0..6}; do
+    printf "%b  %b\n" "${MEM_LINES[$i]}" "${CHART_LINES[$i]}"
+  done
+
+  # extras
+  local load="n/a"
+  if [[ -r /proc/loadavg ]]; then
+    load="$(awk '{print $1" "$2" "$3}' /proc/loadavg 2>/dev/null || echo "n/a")"
+  fi
+
+  printf "\n%bqtop%b  (Q to quit, Ctrl+C to quit)  interval=%ss  updated: %s  avg=%s%%  load=%s\n" \
+    "${DIM}" "${RESET}" "${INTERVAL_SEC}" "$(date '+%F %T')" "$avg_str" "$load"
+}
+
+# -----------------------------
+# Main loop
+# -----------------------------
+if [[ ! -r /proc/stat || ! -r /proc/meminfo ]]; then
+  echo "qtop: requires Linux /proc/stat and /proc/meminfo" >&2
+  exit 1
+fi
+
+read -r prev_total prev_idle < <(cpu_read_times)
+
+# first paint immediately
+cpu_bp=0
+mem_bp="$(mem_basis_points_top_style)"
+draw "$cpu_bp" "$mem_bp"
+
+while true; do
+  # Wait for either:
+  # - a keypress (Q quits)
+  # - timeout (interval elapses -> update)
+  key=""
+  if IFS= read -r -n 1 -s -t "$INTERVAL_SEC" key 2>/dev/null; then
+    if [[ "$key" == "q" || "$key" == "Q" ]]; then
+      exit 0
+    fi
+    # any other key just triggers an immediate refresh (harmless)
+  fi
+
+  read -r total idle < <(cpu_read_times)
+  cpu_bp="$(cpu_basis_points_from_delta "$prev_total" "$prev_idle" "$total" "$idle")"
+  prev_total="$total"
+  prev_idle="$idle"
+
+  mem_bp="$(mem_basis_points_top_style)"
+
+  draw "$cpu_bp" "$mem_bp"
+done

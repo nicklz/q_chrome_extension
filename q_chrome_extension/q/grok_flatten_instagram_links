@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# grok_flatten_instagram_links
+# Extract Instagram URLs from Grok "===== PRE ... =====" mixed dumps (NOT valid JSON),
+# output a flat JSON array, print to terminal, and save to:
+#   - database_grok.json  (always overwritten with the latest output)
+#   - q_scrape_grok_00000001.json (or next available) as an archive
+#
+# Usage:
+#   grok_flatten_instagram_links path/to/grok_dump.txt
+#   cat grok_dump.txt | grok_flatten_instagram_links
+
+INPUT="${1:-/dev/stdin}"
+
+command -v jq >/dev/null 2>&1 || { echo "error: jq is required" >&2; exit 1; }
+command -v awk >/dev/null 2>&1 || { echo "error: awk is required" >&2; exit 1; }
+
+# Archive filename (8-digit)
+base="q_scrape_grok_"
+n=1
+while :; do
+  archive="$(printf "%s%08d.json" "$base" "$n")"
+  [ -e "$archive" ] || break
+  n=$((n+1))
+done
+
+latest="database_grok.json"
+
+# Extract + normalize + dedupe -> JSON array
+# - finds any https://www.instagram.com/... substring
+# - trims trailing punctuation
+# - ensures trailing slash
+# - unique + stable sort
+awk '
+{
+  gsub(/\r/, "", $0)  # handle CRLF files safely
+  line = $0
+  while (match(line, /https:\/\/www\.instagram\.com\/[^[:space:]"<>]+/)) {
+    url = substr(line, RSTART, RLENGTH)
+
+    # trim trailing punctuation that often sticks to JSON/text
+    sub(/[",)\]}>.,;:]+$/, "", url)
+
+    # normalize trailing slash
+    if (url !~ /\/$/) url = url "/"
+
+    print url
+
+    # continue scanning after this match
+    line = substr(line, RSTART + RLENGTH)
+  }
+}
+' "$INPUT" \
+| sort -u \
+| jq -R -s 'split("\n") | map(select(length>0))' \
+| tee "$latest" "$archive" >/dev/stdout
+
+echo "Saved: $latest"  >&2
+echo "Saved: $archive" >&2

@@ -1,6 +1,6 @@
 <!--?xml version="1.0" encoding="UTF-8"?-->
 <svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 256 256">
-  <rect width="256" height="256" fill="#0b1117"></rect>
+  <rect width="256" height="256" fill="black"></rect>
   <!-- ultra thin red bars with minimal spacing (X version: double diagonals) -->
   <g stroke="#ff2a55" stroke-width="3" stroke-linecap="round" fill="none">
     <!-- top-left to bottom-right pair -->

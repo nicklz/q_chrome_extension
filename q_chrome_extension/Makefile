@@ -91,7 +91,7 @@ up: venv
 		echo "✅ Memcached running (brew services)"; \
 	else \
 		echo "🔄 Running rsync to update desktop folder because fuck chrome..."; \
-		rsync -az /home/nick/sites/waypoints/nexus/scripts/q_chrome_extension/ /mnt/c/Users/nkuhn/Desktop/q_chrome_extension/ & \
+		rsync -az /home/nexus/sites/waypoints/nexus/scripts/q_chrome_extension/ /mnt/c/Users/nkuhn/Desktop/q_chrome_extension/ & \
 		sudo service nginx stop >/dev/null 2>&1 || echo "ℹ️ Nginx not running."; \
 		sudo systemctl restart memcached || sudo service memcached restart; \
 		echo "✅ Memcached running on 127.0.0.1:11211"; \

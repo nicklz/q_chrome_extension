@@ -1,0 +1,1141 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# ============================================================
+# Q MERGE DATABASE — PRO + EXTENDED
+# ============================================================
+#
+# Merge / split / (NEW) combine JSON database shards.
+#
+# ------------------------------------------------------------
+# Feature 1 (NO ARG):
+#   - Input:  all *.json in current directory (excluding database*.json)
+#   - Action: groups files by STRUCTURE SIGNATURE (schema hash) and only merges identical structures
+#   - Output:
+#       * If exactly 1 structure group => database.json is merged JSON
+#       * If multiple structure groups => database.json is wrapper with groups[]
+#
+# Feature 2 (ARG, letters-only):
+#   - Input:  q_scrape_<arg>_*.json   (current directory only)
+#   - Output: database_<arg>.json
+#
+# Feature 3 (ARG == split keyword, letters-only):
+#   - Command: qmergedatabase split   (or shard/break/separate/expand/undo/breach/...)
+#   - Input:   database.json (large JSON payload)
+#   - Output (same directory):
+#       * database_schema.json  (schema map, depth<=5, includes path + types)
+#       * database_meta.json    (reserved / currently unused by loader)
+#       * database_file_1.json ... database_file_N.json  (~10MiB raw JSON text shards)
+#       * database.json is overwritten into a MANIFEST JSON ARRAY listing ONLY the shard paths
+#         (so clients can safely reassemble with: parts.join(''))
+#       * database_manifest.json is ALSO written (object) with schema/meta/parts + sha1/bytes
+#
+# Feature 4 (REAL-TIME TESTS):
+#   - If arg1 + arg2 present, and arg2 == test:
+#       qmergedatabase google test
+#     then AFTER merge the script asserts:
+#       - output JSON parses
+#       - output bytes >= largest input bytes (1 input)
+#       - output bytes  > largest input bytes (2+ inputs)
+#     If the check fails, the script refuses to overwrite the final database file and exits non-zero.
+#
+# Feature 5 (NEW) (ARG == combine OR merge keyword, letters-only):
+#   - Command: qmergedatabase combine
+#   - Alias:   qmergedatabase merge
+#   - Input:   database_file_*.json (current directory)
+#   - Action:
+#       * concatenates shard bytes (in numeric order) with NO decoding/normalization
+#       * (optional) verifies sha1/byte-size if database_meta.json is present
+#   - Output:
+#       * writes ~/downloads/database_combined_<unixtimestamp>.json
+#       * DOES NOT write anything to the current directory
+#
+# Notes:
+# - Arg must be a single word: letters only (A-Z/a-z). No digits. No punctuation. No underscores.
+# - Split shards are UTF-8-safe text slices of the original JSON bytes, meant for text concatenation.
+
+OUT="database.json"
+ARG1="${1:-}"
+ARG2="${2:-}"
+
+command -v python3 >/dev/null 2>&1 || { echo "❌ python3 required" >&2; exit 1; }
+
+# -------------------------
+# TEST MODE PARSING
+# -------------------------
+TEST_MODE=false
+if [[ -n "${ARG2}" ]]; then
+  if [[ "${ARG2,,}" == "test" ]]; then
+    TEST_MODE=true
+  else
+    echo "❌ unknown 2nd arg: $ARG2  (only supported: test)" >&2
+    exit 1
+  fi
+fi
+
+# Convenience: allow `qmergedatabase test` to mean "no-arg merge + test".
+if [[ -z "${ARG2}" && "${ARG1,,}" == "test" ]]; then
+  TEST_MODE=true
+  ARG1=""
+fi
+
+ARG="$ARG1"
+
+# --- Enforce: arg must be a single word, letters only (no digits / underscores / punctuation) ---
+if [[ -n "$ARG" ]]; then
+  if [[ ! "$ARG" =~ ^[A-Za-z]+$ ]]; then
+    echo "❌ arg must be a single word of letters only (A-Z/a-z)." >&2
+    exit 1
+  fi
+fi
+
+LC_ARG="${ARG,,}"  # lowercase
+
+# Keywords that mean: "shard/split database.json into many files"
+SPLIT_WORDS=(
+  split shard break separate expand undo breach
+  unpack explode fracture partition chunk slice scatter disassemble divide
+)
+
+# Keywords that mean: "combine database_file_*.json into a single JSON"
+# Per request: BOTH "combine" and "merge" are reserved command-words for this mode.
+COMBINE_WORDS=(
+  combine merge
+)
+
+MODE="merge"
+declare -a FILES=()
+
+is_split=false
+is_combine=false
+
+if [[ -n "$ARG" ]]; then
+  for w in "${SPLIT_WORDS[@]}"; do
+    if [[ "$LC_ARG" == "$w" ]]; then
+      is_split=true
+      break
+    fi
+  done
+
+  if ! $is_split; then
+    for w in "${COMBINE_WORDS[@]}"; do
+      if [[ "$LC_ARG" == "$w" ]]; then
+        is_combine=true
+        break
+      fi
+    done
+  fi
+fi
+
+# -------------------------
+# MODE: COMBINE (NEW)
+# -------------------------
+# IMPORTANT: This mode only triggers when ARG1 is present AND is one of:
+#   combine | merge  (case-insensitive)
+#
+# It reads database_file_*.json from the CURRENT directory and writes the output ONLY to ~/downloads.
+if $is_combine; then
+  DOWNLOAD_DIR="$HOME/downloads"
+  mkdir -p "$DOWNLOAD_DIR"
+
+  mapfile -t FILES < <(
+    find . -maxdepth 1 -type f \( -name "database_file_*.json" -o -name "database_file_*.json.gz" \) -printf '%P\n'
+  )
+
+  if [[ "${#FILES[@]}" -eq 0 ]]; then
+    echo "❌ 0 matching files in current directory: database_file_*.json (or .json.gz)" >&2
+    exit 1
+  fi
+
+  OUT_PATH="$(python3 - "$DOWNLOAD_DIR" "${FILES[@]}" <<'PY'
+import hashlib
+import json
+import os
+import re
+import sys
+import time
+import gzip
+from typing import List, Tuple, Optional
+
+# argv: <download_dir> <file1> <file2> ...
+download_dir = os.path.expanduser(sys.argv[1])
+candidate_files = sys.argv[2:]
+
+rx = re.compile(r"^database_file_(\d+)\.json(?:\.gz)?$")
+
+def _num(name: str) -> int:
+    m = rx.match(os.path.basename(name))
+    return int(m.group(1)) if m else 10**18
+
+def load_parts_from_database_json() -> Optional[List[str]]:
+    """If database.json is a manifest (list or object), pull ONLY shard paths."""
+    if not os.path.exists("database.json"):
+        return None
+    try:
+        with open("database.json", "r", encoding="utf-8") as f:
+            v = json.load(f)
+    except Exception:
+        return None
+
+    parts: List[str] = []
+    if isinstance(v, list):
+        for x in v:
+            if isinstance(x, str) and rx.match(os.path.basename(x)):
+                parts.append(x)
+    elif isinstance(v, dict) and isinstance(v.get("parts"), list):
+        for x in v["parts"]:
+            if isinstance(x, str) and rx.match(os.path.basename(x)):
+                parts.append(x)
+
+    if not parts:
+        return None
+    parts.sort(key=_num)
+    return parts
+
+def load_expected_from_meta() -> Tuple[Optional[str], Optional[int]]:
+    if not os.path.exists("database_meta.json"):
+        return None, None
+    try:
+        with open("database_meta.json", "r", encoding="utf-8") as f:
+            m = json.load(f)
+        sha1 = m.get("sha1") if isinstance(m.get("sha1"), str) else None
+        ob = m.get("originalBytes")
+        if not isinstance(ob, int):
+            ob = None
+        return sha1, ob
+    except Exception:
+        return None, None
+
+parts = load_parts_from_database_json()
+if parts is None:
+    # Fall back to the candidate list passed from bash (find database_file_*.json)
+    items: List[Tuple[int, str]] = []
+    for p in candidate_files:
+        base = os.path.basename(p)
+        m = rx.match(base)
+        if not m:
+            continue
+        items.append((int(m.group(1)), p))
+    if not items:
+        raise SystemExit("❌ no inputs matched database_file_<n>.json")
+    items.sort(key=lambda t: t[0])
+    parts = [p for _, p in items]
+
+os.makedirs(download_dir, exist_ok=True)
+
+unix_ts = int(time.time())
+out_name = f"database_combined_{unix_ts}.json"
+out_path = os.path.join(download_dir, out_name)
+tmp_path = out_path + f".tmp.{os.getpid()}"
+
+expected_sha1, expected_bytes = load_expected_from_meta()
+
+h = hashlib.sha1()
+wrote_bytes = 0
+
+with open(tmp_path, "wb") as out:
+    for p in parts:
+        # Allow manifest entries to include paths; combine relative to cwd.
+        fp = p
+        # If shards are gzipped, decompress while combining.
+        opener = gzip.open if str(fp).lower().endswith(".gz") else open
+        with opener(fp, "rb") as f:
+            while True:
+                chunk = f.read(1024 * 1024)
+                if not chunk:
+                    break
+                out.write(chunk)
+                h.update(chunk)
+                wrote_bytes += len(chunk)
+
+got_sha1 = h.hexdigest()
+
+if expected_bytes is not None and wrote_bytes != expected_bytes:
+    raise SystemExit(f"❌ byte-size mismatch: expected={expected_bytes} got={wrote_bytes}")
+
+if expected_sha1 is not None and got_sha1 != expected_sha1:
+    raise SystemExit(f"❌ sha1 mismatch: expected={expected_sha1} got={got_sha1}")
+
+os.replace(tmp_path, out_path)
+print(out_path)
+PY
+)"
+
+  echo "✅ wrote: $OUT_PATH"
+  echo "✅ done: $OUT_PATH"
+  exit 0
+fi
+
+# -------------------------
+# MODE: SPLIT
+# -------------------------
+if $is_split; then
+  MODE="split"
+  [[ -f "$OUT" ]] || { echo "❌ cannot split: $OUT not found in current directory" >&2; exit 1; }
+  FILES=("$OUT")
+else
+  MODE="merge"
+  if [[ -n "$ARG" ]]; then
+    OUT="database_${ARG}.json"
+    PATTERN="q_scrape_${ARG}_*.json"
+    mapfile -t FILES < <(find . -maxdepth 1 -type f -name "$PATTERN" -printf '%P\n' | sort)
+    TOTAL="${#FILES[@]}"
+    [[ "$TOTAL" -eq 0 ]] && echo "❌ 0 matching files in current directory: $PATTERN" >&2 && exit 1
+  else
+    mapfile -t FILES < <(
+      find . -maxdepth 1 -type f -name "*.json" \
+        ! -name "database*.json" \
+        -printf '%P\n' | sort
+    )
+    TOTAL="${#FILES[@]}"
+    [[ "$TOTAL" -eq 0 ]] && echo "❌ 0 matching *.json files in current directory (excluding database*.json)" >&2 && exit 1
+  fi
+fi
+
+# -------------------------
+# INPUT SIZE STATS (for merge guards)
+# -------------------------
+MAX_IN_BYTES=0
+SUM_IN_BYTES=0
+MAX_IN_FILE=""
+if [[ "$MODE" == "merge" ]]; then
+  for f in "${FILES[@]}"; do
+    b="$(wc -c < "./$f" | tr -d ' ')"
+    [[ -n "$b" ]] || b=0
+    SUM_IN_BYTES=$((SUM_IN_BYTES + b))
+    if (( b > MAX_IN_BYTES )); then
+      MAX_IN_BYTES="$b"
+      MAX_IN_FILE="$f"
+    fi
+  done
+fi
+
+PY="$(mktemp)"
+
+cat >"$PY" <<'PY'
+import sys, json, os, hashlib, datetime, random, gc, gzip
+from typing import Any, Dict, List, Tuple, Optional
+
+mode = sys.argv[1] if len(sys.argv) > 1 else "merge"
+out_path = sys.argv[2] if len(sys.argv) > 2 else "database.json"
+files = sys.argv[3:]
+
+# --- Tunables (merge) ---
+SCHEMA_SAMPLE_LIST = 40      # list sampling for structure signature
+COMMON_KEY_FRAC = 0.60       # keys present in >=60% of sampled dict-elements are "common"
+MAX_SCHEMA_DEPTH = 4         # depth for structure signature grouping
+
+# --- Tunables (split/shard) ---
+SPLIT_TARGET_BYTES = 10 * 1024 * 1024  # ~10 MiB per shard (fuzzy OK)
+SPLIT_SCHEMA_DEPTH = 5                 # schema depth (requested)
+SPLIT_SCHEMA_KEYS_CAP = 300            # max keys per dict node recorded
+SPLIT_SCHEMA_RECURSE_KEYS = 80         # max child keys recursed per dict node
+SPLIT_LIST_SAMPLE = 40                 # list sampling for schema typing (deterministic)
+
+# --- Tunables (gzip) ---
+# Split mode should NOT compress shards by default.
+# To enable gzip compression, run with:
+#   COMPRESS_SHARDS_GZIP=1 GZIP_LEVEL=6  qmergedatabase split
+# (GZIP_LEVEL range: 1-9)
+COMPRESS_SHARDS_GZIP = os.getenv("COMPRESS_SHARDS_GZIP", "").strip().lower() in ("1","true","yes","y","on")
+try:
+    GZIP_LEVEL = int(os.getenv("GZIP_LEVEL", "6"))
+except Exception:
+    GZIP_LEVEL = 6
+GZIP_LEVEL = 1 if GZIP_LEVEL < 1 else (9 if GZIP_LEVEL > 9 else GZIP_LEVEL)
+
+SCHEMA_FILE = "database_schema.json"
+META_FILE = "database_meta.json"
+MANIFEST_FILE = "database_manifest.json"
+DATA_FILE_TEMPLATE = "database_file_{i}.json"
+
+VOLATILE_KEYS = {
+    "exportedAt","exported_at",
+    "collectedAt","collected_at",
+    "scrapedAt","scraped_at",
+    "fetchedAt","fetched_at",
+    "createdAt","created_at",
+    "updatedAt","updated_at",
+    "timestamp","timeStamp","ts",
+    "runId","run_id",
+    "jobId","job_id",
+    "requestId","request_id",
+    "traceId","trace_id",
+    "sessionId","session_id",
+}
+
+TS_KEYS = [
+    "collectedAt","collected_at",
+    "exportedAt","exported_at",
+    "scrapedAt","scraped_at",
+    "fetchedAt","fetched_at",
+    "createdAt","created_at",
+    "updatedAt","updated_at",
+    "timestamp","timeStamp","ts",
+]
+
+def now_utc_iso() -> str:
+    return datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00","Z")
+
+def load_json(path: str) -> Any:
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+def typecat(x: Any) -> str:
+    if x is None:
+        return "null"
+    if isinstance(x, bool):
+        return "bool"
+    if isinstance(x, (int, float)) and not isinstance(x, bool):
+        return "number"
+    if isinstance(x, str):
+        return "string"
+    if isinstance(x, list):
+        return "list"
+    if isinstance(x, dict):
+        return "dict"
+    return type(x).__name__
+
+def ts_of(obj: Any) -> str:
+    if not isinstance(obj, dict):
+        return ""
+    for k in TS_KEYS:
+        v = obj.get(k)
+        if isinstance(v, str) and v.strip():
+            return v.strip()
+    return ""
+
+# ----------------------------
+# Structure signature (merge)
+# ----------------------------
+def _common_keys_for_dict_elems(dicts: List[Dict[str, Any]]) -> List[str]:
+    if not dicts:
+        return []
+    counts: Dict[str,int] = {}
+    n = len(dicts)
+    for d in dicts:
+        for k in d.keys():
+            if k in VOLATILE_KEYS:
+                continue
+            counts[k] = counts.get(k, 0) + 1
+    thresh = max(1, int(n * COMMON_KEY_FRAC))
+    keys = sorted([k for k, c in counts.items() if c >= thresh])
+    return keys[:300]
+
+def schema(obj: Any, depth: int = 0) -> Any:
+    t = typecat(obj)
+    if depth >= MAX_SCHEMA_DEPTH:
+        return {"t": t}
+
+    if isinstance(obj, dict):
+        keys = [k for k in obj.keys() if k not in VOLATILE_KEYS]
+        keys.sort()
+        kid_types = {k: typecat(obj.get(k)) for k in keys[:300]}
+        kids = {}
+        for k in keys[:80]:
+            v = obj.get(k)
+            if isinstance(v, (dict, list)):
+                kids[k] = schema(v, depth + 1)
+        return {"t":"dict", "keys": keys[:300], "kidTypes": kid_types, "kids": kids}
+
+    if isinstance(obj, list):
+        if not obj:
+            return {"t":"list", "elem":"empty"}
+
+        if len(obj) <= SCHEMA_SAMPLE_LIST:
+            sample = obj
+        else:
+            sample = random.sample(obj, SCHEMA_SAMPLE_LIST)
+
+        etypes = sorted({typecat(e) for e in sample})
+
+        if etypes == ["dict"]:
+            dicts = [e for e in sample if isinstance(e, dict)]
+            common_keys = _common_keys_for_dict_elems(dicts)
+            return {"t":"list", "elem":"dict", "commonKeys": common_keys}
+
+        return {"t":"list", "elemTypes": etypes}
+
+    return {"t": t}
+
+def schema_hash(obj: Any) -> str:
+    s = json.dumps(schema(obj), ensure_ascii=False, sort_keys=True, separators=(",",":"))
+    return hashlib.sha1(s.encode("utf-8")).hexdigest()[:12]
+
+def structure_match(a: Any, b: Any) -> bool:
+    return schema(a) == schema(b)
+
+# ----------------------------
+# De-dupe + merge (merge)
+# ----------------------------
+def scrub_volatile(x: Any) -> Any:
+    if isinstance(x, dict):
+        out = {}
+        for k, v in x.items():
+            if k in VOLATILE_KEYS:
+                continue
+            out[k] = scrub_volatile(v)
+        return out
+    if isinstance(x, list):
+        return [scrub_volatile(v) for v in x]
+    return x
+
+def fingerprint(x: Any) -> str:
+    s = json.dumps(scrub_volatile(x), ensure_ascii=False, sort_keys=True, separators=(",",":"))
+    return hashlib.sha1(s.encode("utf-8")).hexdigest()
+
+def better(old: Any, neu: Any) -> Any:
+    if old is None:
+        return neu
+    if not isinstance(old, dict) or not isinstance(neu, dict):
+        return neu
+    if ts_of(neu) > ts_of(old):
+        return neu
+    if len(neu.keys()) > len(old.keys()):
+        return neu
+    return old
+
+def merge_list(A: List[Any], B: List[Any]) -> Tuple[List[Any], int]:
+    out_map: Dict[str, Any] = {}
+    order: List[str] = []
+
+    def add(item: Any):
+        h = fingerprint(item)
+        if h not in out_map:
+            out_map[h] = item
+            order.append(h)
+        else:
+            out_map[h] = better(out_map[h], item)
+
+    for item in A:
+        add(item)
+    before = len(order)
+    for item in B:
+        add(item)
+
+    merged = [out_map[h] for h in order]
+    return merged, (len(order) - before)
+
+def is_emptyish(x: Any) -> bool:
+    return x is None or x == "" or x == {} or x == []
+
+def merge(A: Any, B: Any, path: Tuple[str,...] = ()) -> Tuple[Any, int]:
+    if A is None:
+        return B, 0
+    if B is None:
+        return A, 0
+
+    if isinstance(A, dict) and isinstance(B, dict):
+        out: Dict[str, Any] = {}
+        added_total = 0
+        keys = set(A.keys()) | set(B.keys())
+        for k in keys:
+            out[k], added = merge(A.get(k), B.get(k), path + (str(k),))
+            added_total += added
+        return out, added_total
+
+    if isinstance(A, list) and isinstance(B, list):
+        return merge_list(A, B)
+
+    if isinstance(A, (int, float)) and isinstance(B, (int, float)) and not isinstance(A, bool) and not isinstance(B, bool):
+        return (A if A >= B else B), 0
+
+    if isinstance(A, str) and isinstance(B, str):
+        key = (path[-1].lower() if path else "")
+        if key in {k.lower() for k in TS_KEYS}:
+            return (A if A >= B else B), 0
+        return (B if B.strip() else A), 0
+
+    if is_emptyish(B):
+        return A, 0
+    return B, 0
+
+def maybe_stamp_exported_at(x: Any) -> Any:
+    if isinstance(x, dict):
+        n = now_utc_iso()
+        if "exportedAt" in x and isinstance(x.get("exportedAt"), str):
+            x["exportedAt"] = n
+        if "exported_at" in x and isinstance(x.get("exported_at"), str):
+            x["exported_at"] = n
+    return x
+
+# ----------------------------
+# Split/shard schema (depth<=5 + path + types)
+# ----------------------------
+def build_schema_nodes(obj: Any) -> Dict[str, Any]:
+    nodes: List[Dict[str, Any]] = []
+    seen: set[str] = set()
+
+    def add(node: Dict[str, Any]) -> None:
+        p = node.get("path", "")
+        if not p or p in seen:
+            return
+        seen.add(p)
+        nodes.append(node)
+
+    def walk(x: Any, path: str, depth: int) -> None:
+        if isinstance(x, dict):
+            keys = [k for k in x.keys() if k not in VOLATILE_KEYS]
+            keys.sort()
+            kid_types = {k: typecat(x.get(k)) for k in keys[:SPLIT_SCHEMA_KEYS_CAP]}
+            add({
+                "path": path,
+                "t": "dict",
+                "keys": keys[:SPLIT_SCHEMA_KEYS_CAP],
+                "kidTypes": kid_types,
+            })
+
+            if depth >= SPLIT_SCHEMA_DEPTH:
+                return
+
+            for k in keys[:SPLIT_SCHEMA_RECURSE_KEYS]:
+                v = x.get(k)
+                child_path = f"{path}.{k}" if path != "$" else f"$.{k}"
+                if isinstance(v, (dict, list)):
+                    walk(v, child_path, depth + 1)
+                else:
+                    add({"path": child_path, "t": typecat(v)})
+            return
+
+        if isinstance(x, list):
+            n = len(x)
+            if n == 0:
+                add({"path": path, "t": "list", "len": 0, "elem": "empty"})
+                return
+
+            sample = x if n <= SPLIT_LIST_SAMPLE else x[:SPLIT_LIST_SAMPLE]  # deterministic
+            etypes = sorted({typecat(e) for e in sample})
+            node: Dict[str, Any] = {"path": path, "t": "list", "len": n, "elemTypes": etypes}
+
+            if etypes == ["dict"]:
+                dicts = [e for e in sample if isinstance(e, dict)]
+                common = _common_keys_for_dict_elems(dicts)
+                elem_kid_types: Dict[str, List[str]] = {}
+                for ck in common:
+                    elem_kid_types[ck] = sorted({typecat(d.get(ck)) for d in dicts})
+                node.update({
+                    "elem": "dict",
+                    "commonKeys": common,
+                    "elemKidTypes": elem_kid_types,
+                })
+                add(node)
+
+                if depth < SPLIT_SCHEMA_DEPTH and dicts:
+                    rep = max(dicts, key=lambda d: len(d.keys()))
+                    walk(rep, f"{path}[]", depth + 1)
+                return
+
+            if etypes == ["list"]:
+                node.update({"elem": "list"})
+                add(node)
+                if depth < SPLIT_SCHEMA_DEPTH:
+                    rep = next((e for e in sample if isinstance(e, list)), None)
+                    if rep is not None:
+                        walk(rep, f"{path}[]", depth + 1)
+                return
+
+            add(node)
+            return
+
+        add({"path": path, "t": typecat(x)})
+
+    walk(obj, "$", 0)
+
+    schema_doc: Dict[str, Any] = {
+        "exportedAt": now_utc_iso(),
+        "schemaVersion": 1,
+        "maxDepth": SPLIT_SCHEMA_DEPTH,
+        "rootType": typecat(obj),
+        "nodes": nodes,
+    }
+
+    sig = hashlib.sha1(
+        json.dumps(nodes, ensure_ascii=False, sort_keys=True, separators=(",",":")).encode("utf-8")
+    ).hexdigest()[:12]
+    schema_doc["signature"] = sig
+    return schema_doc
+
+def _is_utf8_continuation_byte(b: int) -> bool:
+    return (b & 0xC0) == 0x80  # 10xxxxxx
+
+def _adjust_end_to_utf8_boundary(data: bytes, start: int, end: int) -> int:
+    n = len(data)
+    if end >= n:
+        return n
+    while end > start and end < n and _is_utf8_continuation_byte(data[end]):
+        end -= 1
+    if end == start:
+        end = min(start + SPLIT_TARGET_BYTES, n)
+        while end < n and _is_utf8_continuation_byte(data[end]):
+            end += 1
+        end = min(end, n)
+    return end
+
+def split_database_file(src_path: str, out_dir: str, data: Optional[bytes] = None) -> Dict[str, Any]:
+    if data is None:
+        with open(src_path, "rb") as f:
+            data = f.read()
+    else:
+        # Ensure we're working with immutable bytes
+        if isinstance(data, bytearray):
+            data = bytes(data)
+        elif not isinstance(data, (bytes,)):
+            raise TypeError("split_database_file(data=...) must be bytes or bytearray")
+
+    total = len(data)
+    if total == 0:
+        raise RuntimeError(f"{src_path} is empty; nothing to split")
+
+    parts: List[str] = []
+    start = 0
+    i = 1
+
+    while start < total:
+        end = min(start + SPLIT_TARGET_BYTES, total)
+        end = _adjust_end_to_utf8_boundary(data, start, end)
+        chunk = data[start:end]
+
+        # Verify chunk decodes standalone (critical for browser fetch().text())
+        try:
+            chunk.decode("utf-8")
+        except UnicodeDecodeError:
+            e = end
+            while e > start:
+                e -= 1
+                chunk = data[start:e]
+                try:
+                    chunk.decode("utf-8")
+                    end = e
+                    break
+                except UnicodeDecodeError:
+                    continue
+            else:
+                raise RuntimeError("Could not find a UTF-8 safe boundary for a chunk")
+
+        fname = DATA_FILE_TEMPLATE.format(i=i)
+        out_file = os.path.join(out_dir, fname)
+        with open(out_file, "wb") as out:
+            out.write(chunk)
+
+        parts.append(fname)
+        print(f"✅ shard {i} wrote {fname}  bytes={len(chunk)}", file=sys.stderr)
+
+        start = end
+        i += 1
+
+    return {"parts": parts, "totalBytes": total, "targetBytes": SPLIT_TARGET_BYTES}
+
+def verify_shards_reassemble(parts: List[str], out_dir: str, expected_sha1: str, expected_bytes: int) -> None:
+    """
+    In-memory verification for split mode:
+      - concatenates database_file_*.json shards in order (binary)
+      - validates byte length + sha1 (matches original)
+      - validates that the reconstructed payload parses as JSON
+    Does NOT write any output file.
+    """
+    h = hashlib.sha1()
+    buf = bytearray()
+
+    for fname in parts:
+        p = os.path.join(out_dir, fname)
+        opener = gzip.open if str(fname).lower().endswith(".gz") else open
+        with opener(p, "rb") as f:
+            chunk = f.read()
+        buf.extend(chunk)
+        h.update(chunk)
+
+    got_bytes = len(buf)
+    if got_bytes != expected_bytes:
+        raise RuntimeError(f"reassembled byte-length mismatch: expected={expected_bytes} got={got_bytes}")
+
+    got_sha1 = h.hexdigest()
+    if expected_sha1 and got_sha1 != expected_sha1:
+        raise RuntimeError(f"reassembled sha1 mismatch: expected={expected_sha1} got={got_sha1}")
+
+    # json.loads accepts bytearray and will validate UTF-8 + JSON syntax.
+    parsed = None
+    try:
+        parsed = json.loads(buf)
+    except Exception as e:
+        raise RuntimeError(f"reassembled payload failed JSON validation: {e}")
+    finally:
+        # don't keep a second full copy of the object alive
+        parsed = None
+        gc.collect()
+
+def run_split(out_path: str, src_path: str) -> None:
+    out_dir = os.path.dirname(out_path) or "."
+    src_dir = os.path.dirname(src_path) or "."
+
+    if os.path.abspath(out_dir) != os.path.abspath(src_dir):
+        raise RuntimeError("split mode requires database.json in the same directory you run the script from")
+
+    # Read + parse BEFORE overwriting database.json into the manifest
+    with open(src_path, "rb") as f:
+        raw = f.read()
+
+    raw_bytes = len(raw)
+    if raw_bytes == 0:
+        raise RuntimeError(f"{src_path} is empty; nothing to split")
+
+    raw_sha1 = hashlib.sha1(raw).hexdigest()
+
+    try:
+        obj = json.loads(raw.decode("utf-8"))
+    except Exception as e:
+        raise RuntimeError(f"failed to parse {src_path} as JSON: {e}")
+
+    # Prevent splitting the manifest itself
+    if isinstance(obj, list) and all(isinstance(x, str) for x in obj) and any("database_file_" in x for x in obj):
+        raise RuntimeError(f"{src_path} already looks like a shard manifest (array of file paths). Refusing to split it again.")
+
+    # 1) schema
+    schema_doc = build_schema_nodes(obj)
+    schema_path = os.path.join(out_dir, SCHEMA_FILE)
+    with open(schema_path, "w", encoding="utf-8") as f:
+        json.dump(schema_doc, f, ensure_ascii=False, separators=(",",":"))
+    print(f"🧠 wrote {SCHEMA_FILE}  nodes={len(schema_doc.get('nodes',[]))}  signature={schema_doc.get('signature')}", file=sys.stderr)
+
+    # 2) data shards (raw JSON bytes)
+    split_info = split_database_file(src_path, out_dir, data=raw)
+
+    # 2b) (NEW) optionally gzip-compress each shard so storage + transfers are smaller.
+    if COMPRESS_SHARDS_GZIP:
+        new_parts = []
+        for fname in split_info["parts"]:
+            in_path = os.path.join(out_dir, fname)
+            out_fname = fname + ".gz" if not str(fname).lower().endswith(".gz") else fname
+            gz_path = os.path.join(out_dir, out_fname)
+
+            # Stream gzip write (keeps peak RAM low).
+            with open(in_path, "rb") as src, gzip.open(gz_path, "wb", compresslevel=GZIP_LEVEL) as dst:
+                while True:
+                    chunk = src.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    dst.write(chunk)
+
+            try:
+                os.remove(in_path)
+            except Exception:
+                pass
+
+            new_parts.append(out_fname)
+
+        split_info["parts"] = new_parts
+        split_info["gzip"] = True
+        split_info["gzipLevel"] = GZIP_LEVEL
+
+    # Drop the original raw bytes ASAP; we'll verify reconstruction from shards below.
+    raw = b""
+    gc.collect()
+
+    # 3) meta (unused for now, but created)
+    meta_doc = {
+        "exportedAt": now_utc_iso(),
+        "metaVersion": 1,
+        "source": os.path.basename(src_path),
+        "originalBytes": split_info["totalBytes"],
+        "targetShardBytes": split_info["targetBytes"],
+        "shards": len(split_info["parts"]),
+        "files": {
+            "schema": SCHEMA_FILE,
+            "meta": META_FILE,
+            "parts": split_info["parts"],
+        },
+        "compression": {
+            "gzip": bool(split_info.get("gzip", False)),
+            "gzipLevel": split_info.get("gzipLevel"),
+        },
+        "sha1": raw_sha1,
+    }
+    meta_path = os.path.join(out_dir, META_FILE)
+    with open(meta_path, "w", encoding="utf-8") as f:
+        json.dump(meta_doc, f, ensure_ascii=False, separators=(",",":"))
+    print(f"🧾 wrote {META_FILE}", file=sys.stderr)
+
+    # 4) (NEW) in-memory reassembly + JSON validation check
+    # Free the parsed object before reconstructing + parsing again to reduce peak RAM.
+    obj = None
+    gc.collect()
+
+    try:
+        verify_shards_reassemble(split_info["parts"], out_dir, raw_sha1, raw_bytes)
+        reassembly_msg = f"🔁 reassembly check OK  shards={len(split_info['parts'])}  bytes={raw_bytes}  sha1={raw_sha1}"
+    except Exception as e:
+        print(f"❌ reassembly check FAILED (in-memory join + JSON validate): {e}", file=sys.stderr)
+        raise
+
+    # 5) manifests (written last, after verification)
+    #   - database.json: ONLY shard paths (safe to reassemble with parts.join(''))
+    #   - database_manifest.json: richer object with schema/meta/parts + sha1/bytes
+
+    rich_manifest = {
+        "version": 1,
+        "exportedAt": now_utc_iso(),
+        "sha1": raw_sha1,
+        "originalBytes": raw_bytes,
+        "compression": {
+            "gzip": bool(split_info.get("gzip", False)),
+            "gzipLevel": split_info.get("gzipLevel"),
+        },
+        "files": {
+            "schema": SCHEMA_FILE,
+            "meta": META_FILE,
+            "parts": split_info["parts"],
+        },
+    }
+    rich_path = os.path.join(out_dir, MANIFEST_FILE)
+    tmp_rich = rich_path + ".tmp"
+    with open(tmp_rich, "w", encoding="utf-8") as f:
+        json.dump(rich_manifest, f, ensure_ascii=False, separators=(",",":"))
+    os.replace(tmp_rich, rich_path)
+    print(f"📦 wrote {MANIFEST_FILE}  parts={len(split_info['parts'])}", file=sys.stderr)
+
+    parts_only = split_info["parts"]
+    tmp_path = out_path + ".tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump(parts_only, f, ensure_ascii=False, separators=(",",":"))
+    os.replace(tmp_path, out_path)
+    print(f"🎉 wrote {os.path.basename(out_path)} manifest  entries={len(parts_only)}  dataShards={len(parts_only)}", file=sys.stderr)
+    print(reassembly_msg, file=sys.stderr)
+
+# ----------------------------
+# Merge runner (original behavior)
+# ----------------------------
+def run_merge(out_path: str, files: List[str]) -> None:
+    readable = 0
+    groups: Dict[str, Dict[str, Any]] = {}
+    skipped: List[Dict[str,str]] = []
+
+    for p in files:
+        try:
+            obj = load_json(p)
+            readable += 1
+        except Exception as e:
+            skipped.append({"file": p, "error": str(e)})
+            continue
+
+        h = schema_hash(obj)
+        g = groups.setdefault(h, {"schema": h, "files": [], "bytes": 0})
+        g["files"].append(p)
+        try:
+            g["bytes"] += os.path.getsize(p)
+        except Exception:
+            pass
+
+    group_list = sorted(groups.values(), key=lambda g: (g.get("bytes",0), len(g.get("files",[]))), reverse=True)
+
+    print(f"ℹ️  inputs={len(files)} readable={readable} skipped={len(skipped)} structure_groups={len(group_list)}", file=sys.stderr)
+    for g in group_list:
+        print(f"   - schema={g['schema']} files={len(g['files'])} bytes={g.get('bytes',0)}", file=sys.stderr)
+    if skipped:
+        for s in skipped[:15]:
+            print(f"⚠️  skipped unreadable JSON: {s['file']}  ({s['error']})", file=sys.stderr)
+        if len(skipped) > 15:
+            print(f"⚠️  ...and {len(skipped)-15} more unreadable JSON files", file=sys.stderr)
+
+    merged_groups: List[Dict[str, Any]] = []
+    total_files = sum(len(g["files"]) for g in group_list)
+
+    for gi, g in enumerate(group_list, start=1):
+        acc: Any = None
+        added_total = 0
+        gfiles = sorted(g["files"])
+
+        for fi, p in enumerate(gfiles, start=1):
+            try:
+                obj = load_json(p)
+            except Exception as e:
+                print(f"⚠️  group {gi}/{len(group_list)} read failed: {p} ({e})", file=sys.stderr)
+                continue
+
+            acc, added = merge(acc, obj, ())
+            added_total += max(0, added)
+
+            pct = int((fi * 100) / max(1, len(gfiles)))
+            print(f"✅ group {gi}/{len(group_list)} {pct:3d}% ({fi}/{len(gfiles)}) merged: {p}", file=sys.stderr)
+
+        acc = maybe_stamp_exported_at(acc)
+
+        merged_groups.append({
+            "schema": g["schema"],
+            "files": gfiles,
+            "bytes": g.get("bytes", 0),
+            "merged": acc,
+            "qStats": {
+                "files": len(gfiles),
+                "approxListAdds": added_total,
+            }
+        })
+
+    exported_at = now_utc_iso()
+
+    if len(merged_groups) == 1:
+        out_obj = merged_groups[0]["merged"]
+    else:
+        out_obj = {
+            "exportedAt": exported_at,
+            "qCompression": 1,
+            "totals": {
+                "groups": len(merged_groups),
+                "files": total_files,
+                "skipped": len(skipped),
+            },
+            "groups": merged_groups,
+        }
+
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(out_obj, f, ensure_ascii=False, separators=(",",":"))
+
+    try:
+        size = os.path.getsize(out_path)
+    except Exception:
+        size = -1
+
+    if isinstance(out_obj, dict) and "groups" in out_obj and isinstance(out_obj["groups"], list):
+        print(f"🎉 wrote {out_path}  groups={len(out_obj['groups'])}  bytes={size}", file=sys.stderr)
+    elif isinstance(out_obj, list):
+        print(f"🎉 wrote {out_path}  items={len(out_obj)}  bytes={size}", file=sys.stderr)
+    else:
+        print(f"🎉 wrote {out_path}  bytes={size}", file=sys.stderr)
+
+# ============================================================
+# Q COMPRESSION PATCH (JSON-ISH INPUT SUPPORT)
+# ============================================================
+import re
+_PRE_LINE_RE = re.compile(r"^\s*={3,}\s*PRE\s+\d+\s*/\s*\d+\s*={3,}\s*$", re.IGNORECASE)
+
+def _strip_pre_lines(text: str) -> str:
+    return "\n".join(ln for ln in text.splitlines() if not _PRE_LINE_RE.match(ln))
+
+def _extract_embedded_json_blocks(text: str) -> List[Any]:
+    text = _strip_pre_lines(text)
+    dec = json.JSONDecoder()
+    vals: List[Any] = []
+    i = 0
+    while True:
+        p1 = text.find("{", i)
+        p2 = text.find("[", i)
+        candidates = [p for p in (p1, p2) if p != -1]
+        if not candidates:
+            break
+        start = min(candidates)
+        try:
+            v, end = dec.raw_decode(text, start)
+            if isinstance(v, (dict, list)):
+                vals.append(v)
+            i = end
+        except Exception:
+            i = start + 1
+    return vals
+
+def load_json(path: str) -> Any:
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        pass
+
+    with open(path, "r", encoding="utf-8", errors="replace") as f:
+        text = f.read()
+
+    blocks = _extract_embedded_json_blocks(text)
+    if not blocks:
+        raise ValueError(f"no JSON blocks found in json-ish file: {path}")
+
+    if len(blocks) == 1:
+        print(f"🧽 json-ish cleaned: {path}  blocks=1", file=sys.stderr)
+        return blocks[0]
+
+    acc: Any = None
+    for b in blocks:
+        acc, _ = merge(acc, b, ())
+
+    acc = maybe_stamp_exported_at(acc)
+    print(f"🧽 json-ish cleaned: {path}  blocks={len(blocks)}", file=sys.stderr)
+    return acc
+
+# ----------------------------
+# Entrypoint
+# ----------------------------
+if mode == "split":
+    if not files:
+        raise SystemExit("❌ split mode requires an input file (expected database.json)")
+    run_split(out_path, files[0])
+else:
+    if not files:
+        raise SystemExit("❌ merge mode requires input JSON files")
+    run_merge(out_path, files)
+PY
+
+# -------------------------
+# RUN + SIZE GUARDS
+# -------------------------
+if [[ "$MODE" == "split" ]]; then
+  python3 "$PY" "$MODE" "$OUT" "${FILES[@]}"
+  rm -f "$PY"
+  echo "✅ done: $OUT"
+  exit 0
+fi
+
+# MERGE MODE writes to a temp path first; if guards fail, we refuse to overwrite $OUT.
+OUT_TMP="${OUT}.tmp.$$"
+python3 "$PY" "$MODE" "$OUT_TMP" "${FILES[@]}"
+rm -f "$PY"
+
+# Validate output exists + parses
+if [[ ! -s "$OUT_TMP" ]]; then
+  echo "❌ merge produced empty output: $OUT_TMP" >&2
+  exit 1
+fi
+
+if ! python3 - <<PY "$OUT_TMP" >/dev/null 2>&1
+import json,sys
+json.load(open(sys.argv[1],"r",encoding="utf-8"))
+PY
+then
+  echo "❌ output is not valid JSON: $OUT_TMP" >&2
+  exit 1
+fi
+
+OUT_BYTES="$(wc -c < "$OUT_TMP" | tr -d ' ')"
+
+REQ="ge"
+if [[ "${#FILES[@]}" -ge 2 ]]; then
+  REQ="gt"
+fi
+
+SIZE_OK=true
+if [[ "$REQ" == "gt" ]]; then
+  if (( OUT_BYTES <= MAX_IN_BYTES )); then
+    SIZE_OK=false
+  fi
+else
+  if (( OUT_BYTES < MAX_IN_BYTES )); then
+    SIZE_OK=false
+  fi
+fi
+
+if ! $SIZE_OK; then
+  FAIL_OUT="${OUT%.json}.FAILED_$(date +%s).json"
+  mv -f "$OUT_TMP" "$FAIL_OUT"
+
+  echo "❌ Q MERGE SIZE CHECK FAILED" >&2
+  echo "   - largest_input_bytes=$MAX_IN_BYTES  file=$MAX_IN_FILE" >&2
+  echo "   - output_bytes=$OUT_BYTES  temp_saved_as=$FAIL_OUT" >&2
+  echo "   - rule: output must be ${REQ} largest_input_bytes" >&2
+  echo "   - this usually means: wrong file pattern OR parse/merge failure OR catastrophic data-loss" >&2
+  exit 1
+fi
+
+# Passed guards; promote temp to final output
+mv -f "$OUT_TMP" "$OUT"
+
+if $TEST_MODE; then
+  echo "✅ TEST MODE PASSED" >&2
+  echo "   inputs=${#FILES[@]}  sum_in_bytes=$SUM_IN_BYTES  max_in_bytes=$MAX_IN_BYTES" >&2
+  echo "   output_bytes=$OUT_BYTES  output=$OUT" >&2
+fi
+
+echo "✅ done: $OUT"

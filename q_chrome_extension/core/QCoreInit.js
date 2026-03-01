@@ -8,49 +8,73 @@
 
   function logError(message, data) {
     try {
-      if (data !== undefined) console.error(TAG, tagStyle, `%c ${message}`, msgStyle, data);
-      else console.error(TAG, tagStyle, `%c ${message}`, msgStyle);
+      if (data !== undefined) console.log(`%c ${message}`, data);
+      else console.log(`%c ${message}`);
     } catch {}
   }
 
   // Promise that resolves when selector exists (or rejects after timeout)
-  function waitForSelector(selector, { timeout = 25000, root = document } = {}) {
+  function waitForSelector(selector, { timeout = 4000, root = document } = {}) {
     return new Promise((resolve, reject) => {
-      const el = root.querySelector(selector);
-      if (el) return resolve(el);
-
-      const obs = new MutationObserver(() => {
-        const found = root.querySelector(selector);
-        if (found) {
-          obs.disconnect();
-          resolve(found);
+      const get = () => {
+        try {
+          return root.querySelector(selector);
+        } catch {
+          return null;
         }
+      };
+
+      const immediate = get();
+      if (immediate) return resolve(immediate);
+
+      let done = false;
+      let t = null;
+      let iv = null;
+      let obs = null;
+
+      const finish = (err, val) => {
+        if (done) return;
+        done = true;
+        try {
+          if (obs) obs.disconnect();
+        } catch {}
+        try {
+          if (t) clearTimeout(t);
+        } catch {}
+        try {
+          if (iv) clearInterval(iv);
+        } catch {}
+        if (err) reject(err);
+        else resolve(val);
+      };
+
+      obs = new MutationObserver(() => {
+        const found = get();
+        if (found) finish(null, found);
       });
 
-      obs.observe(root === document ? document.documentElement : root, {
-        childList: true, subtree: true, attributes: false,
-      });
+      try {
+        obs.observe(root === document ? document.documentElement : root, {
+          childList: true,
+          subtree: true,
+          attributes: false,
+        });
+      } catch {}
 
-      const t = setTimeout(() => {
-        obs.disconnect();
-        reject(new Error(`Timeout waiting for ${selector}`));
+      t = setTimeout(() => {
+        finish(new Error(`Timeout waiting for ${selector}`));
       }, timeout);
 
-      // also poll lightly (covers shadowish DOM)
-      const iv = setInterval(() => {
-        const found = root.querySelector(selector);
-        if (found) {
-          clearInterval(iv);
-          clearTimeout(t);
-          obs.disconnect();
-          resolve(found);
-        }
+      // Also poll lightly (covers weird DOMs / shadow-ish updates)
+      iv = setInterval(() => {
+        const found = get();
+        if (found) finish(null, found);
       }, 1500);
     });
   }
 
   // Promise that resolves when fn() returns a function reference
-  function waitForFunction(getter, { timeout = 25000 } = {}) {
+  function waitForFunction(getter, { timeout = 4000 } = {}) {
     return new Promise((resolve, reject) => {
       try {
         const v = getter();
@@ -84,36 +108,28 @@
     try {
       console.log(`[Q] ⏳ Waiting for ${fnName} and #${id}...`);
       const [el, handler] = await Promise.all([
-        waitForSelector(`#${id}`, { timeout: 1000 }),
-        waitForFunction(fnGetter, { timeout: 1000 }),
+        waitForSelector(`#${id}`, { timeout: 15000 }),
+        waitForFunction(fnGetter, { timeout: 15000 }),
       ]);
 
       if (!el) throw new Error(`Element #${id} not found`);
       if (typeof handler !== 'function') throw new Error(`Handler ${fnName} not a function`);
 
       el.addEventListener('click', handler, { once: false });
+      try { el.disabled = false; el.dataset.qcoreBind = 'ready'; } catch {}
       console.log(`[Q] ✅ Bound ${fnName} to #${id}`);
     } catch (e) {
       const msg = `[Q] ❌ Failed to bind ${fnName} → ${e.message}`;
-      console.error(msg);
+      // console.error(msg);
       if (typeof logError === 'function') logError(msg);
     }
   }
 
-  console.log('[Q] QCoreInit loaded inside', window);
 
-  // Bindings — each will patiently wait for both sides to exist.
-  bindWhenReady('menu-tools',    () => window?.QCoreToolsModal?.showToolsModal,        'QCoreToolsModal.showToolsModal');
-  bindWhenReady('menu-files',    () => window?.QCoreFilesModal?.showFilesModal,        'QCoreFilesModal.showFilesModal');
-  bindWhenReady('menu-new',      () => window?.QCoreTicketModal?.showNewTicket,        'QCoreTicketModal.showNewTicket');
-  bindWhenReady('menu-play',     () => window?.QCorePlayControls?.playState,           'QCorePlayControls.playState');
-  bindWhenReady('menu-pause',    () => window?.QCorePlayControls?.pauseState,          'QCorePlayControls.pauseState');
-  bindWhenReady('menu-mute',     () => window?.QCorePlayControls?.muteState,           'QCorePlayControls.muteState');
-  bindWhenReady('menu-restart',  () => window?.QCorePlayControls?.restartAll,          'QCorePlayControls.restartAll');
-  bindWhenReady('menu-terminal', () => window?.QCoreTerminalModal?.showTerminalModal,  'QCoreTerminalModal.showTerminalModal');
-  //bindWhenReady('menu-automate', () => window?.QCoreSkynet.awaitUser,                              'window.QCoreSkynet.awaitUser');
-  bindWhenReady('menu-configuration', () => window?.QCoreSettingsModal?.showSettingsModal,  'QCoreSettingsModal.showSettingsModal');
-  bindWhenReady('menu-documentation', () => window?.QCoreDocumentation?.showDocumentationModal, 'QCoreDocumentation.showDocumentationModal');
+  
+  
+
+  console.log('[Q] QCoreInit loaded inside', window);
 
 
   // Public API

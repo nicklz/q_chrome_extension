@@ -13,6 +13,7 @@
 # no critical data is lost
 
 sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp && sudo chmod +x /usr/local/bin/yt-dlp
+sudo apt-get update && sudo apt-get install -y php8.3-mbstring && sudo phpenmod mbstring && (sudo systemctl restart php8.3-fpm 2>/dev/null || true)
 
 
 command -v yt-dlp >/dev/null 2>&1 && echo "yt-dlp already installed 🟩 🟩 🟩" || (sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp && sudo chmod +x /usr/local/bin/yt-dlp)

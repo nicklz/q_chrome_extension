@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+set -e
+
+echo "DATABASE SYNC TO NEXUS 🛰️"
+
+ENV_FILE="$HOME/sites/waypoints/nexus/scripts/q_chrome_extension/.env"
+PASSWORD="$(awk -F= '/^PASSWORD=/{print $2}' "$ENV_FILE")"
+
+cd "$HOME/downloads"
+
+qmergedatabase zillow &
+qmergedatabase reddit &
+qmergedatabase google
+
+echo "DATABASES MERGED LOCALLY ✅"
+
+sshpass -p "$PASSWORD" scp -v -o StrictHostKeyChecking=no \
+"$HOME/downloads/database_game.json" \
+www-data@52.8.111.176:/home/nexus/sites/waypoints/nexus/scripts/GameGuide/database.json \
+&& echo "WAYPOINTS SUCCESS 💹" &
+
+sshpass -p "$PASSWORD" scp -v -o StrictHostKeyChecking=no \
+"$HOME/downloads/database_reddit.json" \
+www-data@52.8.111.176:/home/nexus/sites/waypoints/nexus/scripts/DailyPosty/database.json \
+&& echo "DAILYPOSTY SUCCESS 💹" &
+
+sshpass -p "$PASSWORD" scp -v -o StrictHostKeyChecking=no \
+"$HOME/downloads/database_zillow.json" \
+www-data@52.8.111.176:/home/nexus/sites/waypoints/nexus/scripts/VirtualRealty/database.json \
+&& echo "VIRTUALREALTY SUCCESS 💹" &
+
+
+sshpass -p "$PASSWORD" scp -v -o StrictHostKeyChecking=no \
+"$HOME/downloads/database_google.json" \
+www-data@52.8.111.176:/home/nexus/sites/waypoints/nexus/scripts/Waypoints/database.json \
+&& echo "WAYPOINTS SUCCESS 💹" 
+
+
+
+echo "ALL DATABASES SYNCED 🚀"

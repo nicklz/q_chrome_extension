@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -x
+echo "gitq (git quick push) RUNNING... 🛰️"
+gitq
+echo "INITIATING DEPLOYMENT TO NEXUS 🚀"
+
+if [[ "$1" == "fast" ]]; then
+    qdcode
+else
+    qddb &
+    qdcode &
+    wait
+fi

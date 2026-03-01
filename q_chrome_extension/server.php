@@ -1,19 +1,13 @@
 <?php
 // server.php — PHP FAAS clone + Memcache-backed async queue (single-file; no extra workers)
 // Notes:
-// - Queue key (qid): q_<hash4>_<run>
-//   * hash4 = first 4 hex of md5(ticket.description) — strictly the "description" string
-//   * run   = incrementing integer per hash4
-// - If no valid description string exists, default qid: "q_1234_1"
-// - /run enqueues and spawns a background worker within THIS file: `php server.php process <qid> &`
-// - /status returns the full memcache dump (all queue items) as a single object
-// - Queue state lifecycle: idle → generating → complete
-// - Errors are captured and propagated via the `errors` array on each queue item.
-// - FIXES:
-//   * Any request containing a qid: ensure the queue item exists; if it exists, update it “as it’s going”.
-//   * If not existent, create with sane defaults.
-//   * The lifecycle ends on disk write: when a task writes a file, mark that qid as complete in Memcache.
-//   * /q_run now uses provided qid (if valid) and guarantees the lifecycle transitions with memcache updates.
+// - qid = q_<type>_<hash4 or unique name>_<run number padded by at least 10 zeros for large datasets>
+// example qid = q_scrape_amazon_0000000000001
+// example qid = q_write_h42F_0000000000001
+// example qid = q_command_ls_0000000000001
+
+// there wil be many types, the 3rd and 4th items seperated by _ are more fluid, first 2 are strict format
+
 
 ini_set('memory_limit', '-1');
 ini_set('max_execution_time', 0);
@@ -25,6 +19,421 @@ header('Access-Control-Allow-Methods: POST, GET, OPTIONS');
 header('Content-Type: application/json');
 
 $logfile = "/tmp/q_chrome_extension.log";
+
+function q_monitor(): array {
+
+  $region     = "us-west-1";
+  $instanceId = "i-0e2c9a122a1805293";
+  $healthUrl  = "https://nexus-platforms.com";
+
+  $cpuHotThreshold = 99.9;
+
+  static $st = [
+    "samples" => [],
+    "warnings" => 0,
+    "cpu_error_streak" => 0,
+    "http_error_streak" => 0,
+    "last_cpu" => null,
+    "last_http" => null,
+    "restarts" => 0,
+    "last_error" => null
+  ];
+
+  // q_monitor() is *dangerous* in local/dev because it can try to run AWS CLI
+  // commands (stop/start instances) on every request.
+  //
+  // To enable, set:
+  //   Q_MONITOR_ENABLED=1
+  //
+  // Anything else defaults to OFF.
+  $enabled = getenv('Q_MONITOR_ENABLED');
+  if ($enabled === false || !in_array(strtolower((string)$enabled), ['1','true','yes','on'], true)) {
+    $st['enabled'] = false;
+    return $st;
+  }
+  $st['enabled'] = true;
+
+  $run = function(string $cmd): array {
+    $out = [];
+    $rc  = 0;
+    exec($cmd . " 2>&1", $out, $rc);
+    return ["rc"=>$rc,"out"=>trim(implode("\n",$out))];
+  };
+
+  $aws = fn($cmd) => "aws --region " . escapeshellarg($region) . " " . $cmd;
+
+  $getCpu = function() use ($aws,$run,$instanceId) {
+    $start = gmdate("Y-m-d\TH:i:s\Z", time()-300);
+    $end   = gmdate("Y-m-d\TH:i:s\Z");
+
+    $cmd = $aws(
+      "cloudwatch get-metric-statistics".
+      " --namespace AWS/EC2".
+      " --metric-name CPUUtilization".
+      " --dimensions Name=InstanceId,Value={$instanceId}".
+      " --statistics Average".
+      " --period 60".
+      " --start-time {$start}".
+      " --end-time {$end}".
+      " --output text".
+      " --query \"Datapoints | sort_by(@,&Timestamp)[-1].Average\""
+    );
+
+    $r = $run($cmd);
+    if ($r["rc"] !== 0 || !is_numeric($r["out"])) {
+      return ["ok"=>false,"err"=>$r["out"]];
+    }
+
+    return ["ok"=>true,"cpu"=>(float)$r["out"]];
+  };
+
+  $checkHttp = function() use ($run,$healthUrl) {
+    $cmd = "wget -q --spider --timeout=10 --tries=1 " . escapeshellarg($healthUrl);
+    $r = $run($cmd);
+    return $r["rc"] === 0;
+  };
+
+  $waitState = function($want,$timeout) use ($aws,$run,$instanceId) {
+    $deadline = time()+$timeout;
+    while (time() < $deadline) {
+      $cmd = $aws(
+        "ec2 describe-instances".
+        " --instance-ids {$instanceId}".
+        " --query \"Reservations[0].Instances[0].State.Name\"".
+        " --output text"
+      );
+      $r = $run($cmd);
+      if (trim($r["out"]) === $want) return true;
+      sleep(15);
+    }
+    return false;
+  };
+
+  $restart = function($reason) use (&$st,$aws,$run,$waitState,$instanceId) {
+
+    $run($aws("ec2 stop-instances --instance-ids {$instanceId}"));
+    $waitState("stopped",7200); // up to 2h
+
+    $run($aws("ec2 start-instances --instance-ids {$instanceId}"));
+    $waitState("running",600);
+
+    sleep(300); // warmup
+
+    $st["warnings"]=0;
+    $st["cpu_error_streak"]=0;
+    $st["http_error_streak"]=0;
+    $st["restarts"]++;
+
+    return ["restart_reason"=>$reason];
+  };
+
+  // ---- HTTP CHECK ----
+  $httpOk = $checkHttp();
+  $st["last_http"] = $httpOk;
+
+  if (!$httpOk) {
+    $st["http_error_streak"]++;
+  } else {
+    $st["http_error_streak"]=0;
+  }
+
+  if ($st["http_error_streak"] >= 3) {
+    return $restart("http_failure");
+  }
+
+  // ---- CPU CHECK ----
+  $cpuRes = $getCpu();
+
+  if (!$cpuRes["ok"]) {
+    $st["cpu_error_streak"]++;
+    $st["last_error"] = $cpuRes["err"];
+  } else {
+    $cpu = $cpuRes["cpu"];
+    $st["last_cpu"] = $cpu;
+    $st["cpu_error_streak"]=0;
+
+    $st["samples"][] = $cpu;
+    if (count($st["samples"])>30) array_shift($st["samples"]);
+
+    if ($cpu >= $cpuHotThreshold) {
+      $st["warnings"]++;
+    } else {
+      $st["warnings"]=0;
+    }
+
+    if ($st["warnings"]>=10) {
+      return $restart("cpu_hot");
+    }
+  }
+
+  if ($st["cpu_error_streak"]>=3) {
+    return $restart("cpu_command_failure");
+  }
+
+  return $st;
+}
+
+
+/**
+ * q_downoads()
+ *
+ * Infinite loop that:
+ *  - Scans /home/nexus/downloads
+ *  - Finds files starting with "q_"
+ *  - Ensures pattern: q_scrape_<project>_<id>
+ *  - Extracts 3rd "_" segment as project name
+ *  - Executes: qmergedatabase <project>
+ *  - Runs every 10 seconds
+ *  - Logs using qlog()
+ */
+
+function q_downloads_get_rankedpicks_structure() {
+    $structure = [
+        "exportedAt" => "",
+        "homesUrl" => "",
+        "citiesMode" => "",
+        "cityTotal" => 0,
+        "cities" => [],
+        "totals" => [
+            "cities" => 0,
+            "citiesDone" => 0,
+            "pagesDone" => 0,
+            "records" => 0,
+            "cycles" => 0
+        ],
+        "cityIdx" => 0,
+        "pageInCity" => 0,
+        "records" => [
+            [
+                "zpid" => "",
+                "detailUrl" => "",
+                "address" => "",
+                "price" => "",
+                "beds" => "",
+                "baths" => "",
+                "sqft" => "",
+                "listingLabel" => "",
+                "images" => [],
+                "badges" => [],
+                "cityQuery" => "",
+                "pageUrl" => "",
+                "collectedAt" => ""
+            ]
+        ]
+    ];
+
+    return $structure;
+}
+
+/**
+ * q_downloads()
+ *
+ * Scans /home/nexus/downloads for files that look like:
+ *   q_scrape_<project>_<anything...>.json
+ * and triggers:
+ *   qmergedatabase <project>
+ *
+ * IMPORTANT:
+ *   - This is called from HTTP routes, so it MUST be idempotent + cheap.
+ *   - We rate-limit scans (default 10s) and only run ONE merge per project
+ *     when *newer* files appear.
+ */
+function q_downloads(int $scanCooldownSeconds = 10, int $minFileAgeSeconds = 2): array
+{
+    $downloadsDir = '/home/nexus/downloads';
+    $now = time();
+
+    // Avoid running scans on every /status poll / speculative preconnect.
+    // memcache(d) lock prevents duplicate work across concurrent requests.
+    $scanLockKey = 'q:downloads:scan_lock';
+    try {
+        if (!cache_add($scanLockKey, (string)$now, $scanCooldownSeconds)) {
+            return [
+                'skipped' => true,
+                'reason'  => 'cooldown_lock',
+                'cooldown_seconds' => $scanCooldownSeconds,
+                'at'      => date('c')
+            ];
+        }
+    } catch (\Throwable $e) {
+        // If cache is unavailable for any reason, fall back to doing the scan.
+        // (Safer than taking the whole server down.)
+        qlog('Q_DOWNLOADS_LOCK_ERROR', [
+            'message' => $e->getMessage(),
+        ]);
+    }
+
+    qlog('Q_DOWNLOADS_START', [
+        'dir' => $downloadsDir,
+        'pid' => getmypid(),
+        'cooldown_seconds' => $scanCooldownSeconds,
+        'min_file_age_seconds' => $minFileAgeSeconds,
+    ]);
+
+    $summary = [
+        'executed' => [],
+        'skipped'  => [],
+        'ignored'  => 0,
+        'considered_files' => 0,
+        'skipped_young_files' => 0,
+        'at' => date('c')
+    ];
+
+    try {
+        if (!is_dir($downloadsDir)) {
+            qlog('Q_DOWNLOADS_DIR_MISSING', $downloadsDir);
+            $summary['error'] = 'downloads_dir_missing';
+            return $summary;
+        }
+
+        $files = scandir($downloadsDir);
+        if ($files === false) {
+            qlog('Q_DOWNLOADS_SCAN_FAILED');
+            $summary['error'] = 'downloads_scan_failed';
+            return $summary;
+        }
+
+        // 1) Gather newest mtime per project
+        $projectMaxMtime = [];
+        $projectsSeen = [];
+
+        foreach ($files as $file) {
+            if (!is_string($file) || $file === '' || $file === '.' || $file === '..') {
+                continue;
+            }
+
+            if (strpos($file, 'q_') !== 0) {
+                continue;
+            }
+
+            $fullpath = $downloadsDir . '/' . $file;
+            if (!is_file($fullpath)) {
+                continue;
+            }
+
+            $summary['considered_files']++;
+
+            $mtime = @filemtime($fullpath);
+            if (is_int($mtime) && $minFileAgeSeconds > 0 && ($now - $mtime) < $minFileAgeSeconds) {
+                $summary['skipped_young_files']++;
+                continue;
+            }
+
+            $filename = pathinfo($file, PATHINFO_FILENAME);
+            $parts    = explode('_', $filename);
+
+            // Expect: q_scrape_<project>_<anything>
+            if (count($parts) >= 4 && $parts[0] === 'q' && $parts[1] === 'scrape') {
+                $project = substr((string)($parts[2] ?? ''), 0, 40);
+                $project = preg_replace('/[^a-zA-Z0-9\-]/', '', $project);
+
+                if (!$project) {
+                    qlog('Q_DOWNLOADS_INVALID_PROJECT', $file);
+                    continue;
+                }
+
+                $projectsSeen[$project] = true;
+
+                if (is_int($mtime)) {
+                    if (!isset($projectMaxMtime[$project]) || $mtime > $projectMaxMtime[$project]) {
+                        $projectMaxMtime[$project] = $mtime;
+                    }
+                }
+            } else {
+                // It starts with q_, but isn't one of our expected scrape outputs.
+                $summary['ignored']++;
+            }
+        }
+
+        // 2) Trigger at most one merge per project, only when newer files exist
+        foreach (array_keys($projectsSeen) as $project) {
+            $maxMtime = (int)($projectMaxMtime[$project] ?? 0);
+
+            // If we can't compute mtime, be conservative and attempt a merge once per cooldown.
+            $lastKey = 'q:downloads:last_mtime:' . $project;
+            $lastMtime = cache_get($lastKey);
+            $lastMtimeInt = is_numeric($lastMtime) ? (int)$lastMtime : 0;
+
+            if ($maxMtime > 0 && $lastMtimeInt > 0 && $maxMtime <= $lastMtimeInt) {
+                $summary['skipped'][] = [
+                    'project' => $project,
+                    'reason'  => 'no_new_files',
+                    'last_mtime' => $lastMtimeInt,
+                    'max_mtime'  => $maxMtime
+                ];
+                continue;
+            }
+
+            // Prevent concurrent merges per project.
+            $mergeLockKey = 'q:downloads:merge_lock:' . $project;
+            if (!cache_add($mergeLockKey, (string)$now, 300)) {
+                $summary['skipped'][] = [
+                    'project' => $project,
+                    'reason'  => 'merge_lock'
+                ];
+                continue;
+            }
+
+            qlog('Q_DOWNLOADS_PROJECT', [
+                'project' => $project,
+                'pid' => getmypid(),
+                'max_mtime' => $maxMtime,
+                'last_mtime' => $lastMtimeInt,
+            ]);
+
+            $cmd = 'qmergedatabase ' . escapeshellarg($project);
+            qlog('Q_DOWNLOADS_EXEC', [
+                'project' => $project,
+                'cmd'     => $cmd,
+                'pid'     => getmypid(),
+            ]);
+
+            // Fire-and-forget in the background.
+            exec($cmd . ' > /dev/null 2>&1 &');
+
+            // Mark newest mtime so we don't re-run the merge for the same set of files.
+            if ($maxMtime > 0) {
+                cache_set($lastKey, $maxMtime);
+            } else {
+                // If mtime was unavailable, at least record that we attempted.
+                cache_set($lastKey, $now);
+            }
+            cache_set('q:downloads:last_merge_at:' . $project, $now);
+
+            $summary['executed'][] = [
+                'project' => $project,
+                'cmd'     => $cmd,
+                'max_mtime' => $maxMtime,
+            ];
+        }
+
+        qlog('Q_DOWNLOADS_SUMMARY', [
+            'executed_count' => count($summary['executed']),
+            'skipped_count'  => count($summary['skipped']),
+            'ignored'        => $summary['ignored'],
+            'considered_files' => $summary['considered_files'],
+            'skipped_young_files' => $summary['skipped_young_files'],
+        ]);
+
+        return $summary;
+
+    } catch (\Throwable $e) {
+        qlog('Q_DOWNLOADS_ERROR', [
+            'message' => $e->getMessage(),
+            'trace'   => $e->getTraceAsString()
+        ]);
+        $summary['error'] = 'exception';
+        $summary['exception'] = $e->getMessage();
+        return $summary;
+    }
+}
+
+// Backwards compatible typo alias (kept because existing routes call it).
+function q_downoads(): array
+{
+    return q_downloads();
+}
+
 
 // ---------- Logging ----------
 function qlog($label, $data = null) {
@@ -351,7 +760,7 @@ function run_worker_for_qid($qid) {
             'result'       => $results,
             'errors'       => $errors,
             'state'        => [
-                'prompt'     => is_string($prompt) ? mb_substr($prompt, 0, 4000) : null,
+                'prompt'     => $prompt,
                 'faas_count' => count($faas),
                 'qid'        => $qid
             ]
@@ -378,8 +787,97 @@ $uri = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
 
 // Health
 if ($_SERVER['REQUEST_METHOD'] === 'GET' && $uri === '/') {
+    q_downoads();
+    q_monitor();
     qlog('GET /', 'No action defined for root');
     echo json_encode(['message' => 'Q Server Running', 'timestamp' => date('c')]);
+    exit;
+}
+
+// Download helper: stream a file as an attachment.
+//
+// Examples:
+//   GET /download?file=some.mp3
+//   GET /download?dir=downloads&file=q_scrape_google_123.json
+//
+// SECURITY:
+//   - Only allows files inside explicitly whitelisted directories.
+//   - Blocks path traversal (../) by forcing basename() + realpath checks.
+if ($_SERVER['REQUEST_METHOD'] === 'GET' && $uri === '/download') {
+    $file = isset($_GET['file']) ? (string)$_GET['file'] : '';
+    $dirKey = isset($_GET['dir']) ? (string)$_GET['dir'] : 'sandbox';
+
+    $allowedDirs = [
+        // yt-dlp + other generated artifacts
+        'sandbox'   => __DIR__ . '/sandbox',
+        // scraped JSON landing zone
+        'downloads' => '/home/nexus/downloads',
+    ];
+
+    if (!isset($allowedDirs[$dirKey])) {
+        http_response_code(400);
+        echo json_encode(['error' => 'Invalid dir', 'allowed' => array_keys($allowedDirs)]);
+        exit;
+    }
+
+    if ($file === '') {
+        http_response_code(400);
+        echo json_encode(['error' => 'Missing file']);
+        exit;
+    }
+
+    // Prevent path traversal
+    $fileSafe = basename($file);
+    if ($fileSafe !== $file) {
+        http_response_code(400);
+        echo json_encode(['error' => 'Invalid file name']);
+        exit;
+    }
+
+    $baseDir = $allowedDirs[$dirKey];
+    $baseReal = realpath($baseDir);
+    if ($baseReal === false) {
+        http_response_code(500);
+        echo json_encode(['error' => 'Base dir not found', 'dir' => $dirKey]);
+        exit;
+    }
+
+    $fullPath = realpath($baseReal . '/' . $fileSafe);
+    if ($fullPath === false || !str_starts_with($fullPath, $baseReal . DIRECTORY_SEPARATOR)) {
+        http_response_code(404);
+        echo json_encode(['error' => 'File not found']);
+        exit;
+    }
+
+    if (!is_file($fullPath) || !is_readable($fullPath)) {
+        http_response_code(404);
+        echo json_encode(['error' => 'File not readable']);
+        exit;
+    }
+
+    // Stream the file
+    $size = filesize($fullPath);
+    $mime = function_exists('mime_content_type') ? @mime_content_type($fullPath) : null;
+    if (!is_string($mime) || $mime === '') {
+        $mime = 'application/octet-stream';
+    }
+
+    // Override the global JSON content-type
+    header_remove('Content-Type');
+    header('Content-Type: ' . $mime);
+    header('Content-Disposition: attachment; filename="' . $fileSafe . '"');
+    header('X-Content-Type-Options: nosniff');
+    header('Cache-Control: no-store');
+    if (is_int($size) && $size >= 0) {
+        header('Content-Length: ' . $size);
+    }
+
+    // Large files: avoid buffering
+    if (function_exists('fastcgi_finish_request')) {
+        // no-op; keep compatibility
+    }
+
+    readfile($fullPath);
     exit;
 }
 
@@ -537,6 +1035,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && $uri === '/restart') {
 
 // ---------- /test: POST heartbeat — upsert by qid with unix timestamp + dump ----------
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($uri === '/test' || $uri === '/up' || $uri === '/status')) {
+    qLog('downloads');
+    q_downoads();
+    q_monitor();
     $raw  = file_get_contents('php://input');
     $post = json_decode($raw, true);
 
@@ -590,14 +1091,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($uri === '/test' || $uri === '/up'
     $payload = [   
         'qid'       => $qid,
         'status'    => 'ok',
-        'filepath'     => $item['filepath'],
-        'content'     => $item['content'],
-        'state'     => $item['state'],
+        'filepath'  => $item['filepath'] ?? null,
+        'content'   => $item['content']  ?? null,
+        'state'     => $item['state']    ?? null,
         'dump'      => $dump,
         'timestamp' => date('c')
     ];
 
-    if (isset($clientState['debug']) && $clientState['debug'] === 'true') {
+    // NOTE: $clientState can be any JSON type; avoid "Cannot access offset of type ..." errors.
+    if (is_array($clientState) && (($clientState['debug'] ?? '') === 'true')) {
         qlog('🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢  ');
         qlog('🟢🟢🟢🟢 POST to: ' . $uri, $payload);
         qlog("🟢🟢🟢🟢");
@@ -1042,9 +1544,6 @@ if (is_array($forward) && ($forward['ok'] ?? false) === false) {
                 qlog("[$debug_id] SHELL_EXEC RETURNED NULL");
                 $output = '';
             }
-
-            $output = mb_convert_encoding($output, 'UTF-8', 'UTF-8');
-
             $result_payload = [
                 'status'          => 'success',
                 'success'         => true,

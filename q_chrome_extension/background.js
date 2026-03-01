@@ -19,13 +19,29 @@ const pNotificationsCreate = (id, opts) => new Promise(res => chrome.notificatio
 const MATCH_HOSTS = [
   "chatgpt.com",
   "openai.com",
+  "chat.openai.com",
   "instagram.com",
-  "reddit.com",
-  'distrokid.com',
+  "distrokid.com",
   "facebook.com",
   "blockchain.com",
   "virginwifi.com",
-  'runitbyq.com'
+  "google.com",
+  "runitbyq.com",
+  "zillow.com",
+  "flyfrontier.com",
+  "justice.gov",
+  "amazon.com",
+  "www.flyfrontier.com",
+  'google.com',
+  "linkedin.com",
+  "claude.ai",
+  "grok.com",
+  "reddit.com",
+  "ads.reddit.com",
+  "sora.com",
+  "sora.chatgpt.com",
+  "suno.com",
+  "spotify.com"
 ];
 function urlMatches(u = "") {
   try {
