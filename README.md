@@ -2,6 +2,9 @@
 
 ## 🚀 Quick Start
 
+NO LONGER UPDATED SEE CHROME STORE:
+https://chromewebstore.google.com/detail/nexus-platforms-q-browser/olcjonjpklkacajlegajfegbialmcphh
+
 1. Install the Chrome extension (manual install).
 2. Locate the repository on your local machine.
 3. Run:
