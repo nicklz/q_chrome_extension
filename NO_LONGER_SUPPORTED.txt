@@ -1,0 +1,6 @@
+NO LONGER SUPPORTED
+
+This repository is frozen and no longer maintained.
+
+Install the extension from the official Chrome Web Store instead:
+https://chromewebstore.google.com/detail/nexus-platforms-q-browser/olcjonjpklkacajlegajfegbialmcphh
